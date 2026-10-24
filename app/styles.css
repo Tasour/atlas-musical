@@ -317,10 +317,14 @@ h3 { font-size: 11px; font-weight: 650; letter-spacing: 0.09em; text-transform: 
 .track-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
 .track-tags span { color: var(--tag); font-size: 9px; border: 1px solid color-mix(in srgb, var(--tag) 38%, transparent); border-radius: 99px; padding: 1px 5px; }
 .track-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.track-side-actions { display: flex; align-items: center; gap: 3px; }
 .track-bpm { color: var(--muted); font: 10px var(--mono); }
-.track-fav { border: 0; background: transparent; color: var(--muted-2); padding: 1px; line-height: 1; }
+.track-download, .track-fav { border: 0; background: transparent; color: var(--muted-2); padding: 1px; line-height: 1; }
+.track-download:hover, .track-fav:hover { color: var(--accent-2); }
+.track-download .icon, .track-fav .icon { width: 14px; height: 14px; }
+.track-download .icon { fill: none; }
 .track-fav[aria-pressed="true"] { color: var(--accent-2); }
-.track-fav .icon { width: 14px; height: 14px; fill: currentColor; }
+.track-fav .icon { fill: currentColor; }
 .track-fav[aria-pressed="false"] .icon { fill: none; }
 .track-manual { color: var(--accent-2); font-size: 8.5px; border: 1px solid var(--accent); border-radius: 99px; padding: 0 4px; }
 .track-empty { padding: 26px 16px; color: var(--muted); text-align: center; font-size: 12px; }

@@ -107,6 +107,7 @@ Les dossiers `audio/`, `data/` et `work/` sont créés à l’exécution et igno
 - `GET /api/library`
 - `GET /api/track/{id}`
 - `GET /api/audio/{id}` (Range supporté)
+- `GET /api/download/{id}` (MP3 en pièce jointe)
 - `GET /api/export?format=sqlite|json|zip`
 - `POST /api/annotations`
 - `DELETE /api/annotations/{id}`

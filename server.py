@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import tomllib
@@ -147,6 +148,13 @@ def audio_path(track_id: str) -> tuple[Path, dict]:
     return path, track
 
 
+def download_name(track: dict) -> str:
+    base = f"{track.get('artist', '')} - {track.get('title', '')}".strip(" -")
+    base = re.sub(r'[\\/:*?"<>|]+', "-", base)
+    base = re.sub(r"\s+", " ", base).strip(" .")
+    return f"{base or track.get('id', 'piste')}.mp3"
+
+
 @app.get("/api/health")
 def health() -> dict:
     lib = {}
@@ -188,6 +196,17 @@ def audio(track_id: str):
         path,
         media_type="audio/mpeg",
         headers={"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/api/download/{track_id}")
+def download(track_id: str):
+    path, track = audio_path(track_id)
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",
+        filename=download_name(track),
+        headers={"Cache-Control": "no-store"},
     )
 
 

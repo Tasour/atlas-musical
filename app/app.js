@@ -377,7 +377,10 @@ function renderList() {
           <div class="track-tags">${tags.slice(0, 4).map((tag) => `<span style="${tagColorStyle(tag)}">${esc(tag)}</span>`).join("")}</div>
         </div>
         <div class="track-side">
-          <button class="track-fav" type="button" data-fav="${esc(track.id)}" aria-label="Favori" aria-pressed="${favorite}">${icon("star")}</button>
+          <div class="track-side-actions">
+            <button class="track-download" type="button" data-download="${esc(track.id)}" aria-label="Télécharger ${esc(track.title)}" title="Télécharger le MP3">${icon("download")}</button>
+            <button class="track-fav" type="button" data-fav="${esc(track.id)}" aria-label="Favori" aria-pressed="${favorite}">${icon("star")}</button>
+          </div>
           <span class="track-bpm">${Math.round(Number(track.bpm) || 0)} BPM</span>
         </div>
       </div>`;
@@ -818,6 +821,39 @@ async function exportBase(format) {
   }
 }
 
+function filenameFromDisposition(disposition, fallback) {
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition || "");
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1]);
+    } catch {
+      return fallback;
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(disposition || "");
+  return plain ? plain[1] : fallback;
+}
+
+async function downloadTrack(trackId) {
+  const track = state.tracks.find((t) => t.id === trackId);
+  showToast(`Préparation de ${track ? track.title : "la piste"}…`);
+  try {
+    const response = await fetch(`/api/download/${encodeURIComponent(trackId)}`);
+    if (!response.ok) throw new Error(`Téléchargement impossible (${response.status})`);
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filenameFromDisposition(response.headers.get("content-disposition"), `${trackId}.mp3`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("Téléchargement lancé.");
+  } catch (error) {
+    showToast(error.message || "Téléchargement impossible.", "error");
+  }
+}
+
 function applyTheme(theme) {
   const root = document.documentElement;
   const vars = {
@@ -940,6 +976,12 @@ function bindEvents() {
       selectTrack(play.dataset.play, { play: true });
       return;
     }
+    const download = event.target.closest("[data-download]");
+    if (download) {
+      event.stopPropagation();
+      downloadTrack(download.dataset.download);
+      return;
+    }
     const fav = event.target.closest("[data-fav]");
     if (fav) {
       event.stopPropagation();
@@ -952,6 +994,7 @@ function bindEvents() {
 
   $("#trackList").addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
+    if (event.target.closest("button")) return;
     const row = event.target.closest(".track-row");
     if (!row) return;
     event.preventDefault();

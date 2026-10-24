@@ -2,6 +2,13 @@
 
 Toutes les dates sont au format AAAA-MM-JJ.
 
+## [Unreleased]
+
+### Ajouté
+
+- Bouton de téléchargement MP3 sur chaque piste de la liste.
+- Endpoint `GET /api/download/{id}` avec nom de fichier lisible `Artiste - Titre.mp3`.
+
 ## [1.1.0] - 2026-10-24
 
 ### Ajouté

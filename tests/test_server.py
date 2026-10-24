@@ -1,3 +1,6 @@
+import json
+from urllib.parse import unquote
+
 from fastapi.testclient import TestClient
 
 import server
@@ -26,3 +29,25 @@ def test_library_requires_analysis(tmp_path, monkeypatch):
 
     assert response.status_code == 503
     assert "analysée" in response.json()["detail"]
+
+
+def test_download_returns_attachment(tmp_path, monkeypatch):
+    track = {"id": "t1", "title": "Titre test", "artist": "Artiste test", "file_path": "audio/t1.mp3"}
+    library = tmp_path / "library.json"
+    library.write_text(json.dumps({"tracks": [track]}), encoding="utf-8")
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    (audio_dir / "t1.mp3").write_bytes(b"ID3\x04test")
+
+    monkeypatch.setattr(server, "ROOT", tmp_path)
+    monkeypatch.setattr(server, "LIB_JSON", library)
+    monkeypatch.setattr(server, "DB", tmp_path / "missing.sqlite")
+
+    response = TestClient(server.app).get("/api/download/t1")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
+    disposition = unquote(response.headers["content-disposition"])
+    assert "attachment" in disposition
+    assert "Artiste test - Titre test.mp3" in disposition
+    assert response.content == b"ID3\x04test"
