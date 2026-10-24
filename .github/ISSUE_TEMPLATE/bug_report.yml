@@ -1,0 +1,44 @@
+name: Rapport de bug
+description: Signaler un comportement reproductible
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Que s’est-il passé ?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Étapes de reproduction
+      placeholder: |
+        1. Lancer ...
+        2. Cliquer ...
+        3. Observer ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version ou commit
+      placeholder: "v1.1.0 / abc1234"
+  - type: dropdown
+    id: component
+    attributes:
+      label: Composant
+      options:
+        - Interface
+        - API / serveur
+        - Analyse audio
+        - Modèle / scoring
+        - Export
+        - Installation / lancement
+        - Documentation
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs utiles
+      render: shell

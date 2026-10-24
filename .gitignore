@@ -1,0 +1,39 @@
+# Local media and generated data
+audio/
+work/
+data/
+CREDITS.md
+*.mp3
+*.wav
+*.webm
+*.flac
+*.m4a
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Node
+node_modules/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
