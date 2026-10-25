@@ -1,4 +1,4 @@
-.PHONY: install dev analysis download discover run test lint
+.PHONY: install dev analysis download discover clusters run test lint
 
 install:
 	python3 -m pip install -e .
@@ -14,6 +14,9 @@ download:
 
 discover:
 	python3 -m analysis.discover --target 50
+
+clusters:
+	python3 -m analysis.cluster
 
 run:
 	python3 server.py

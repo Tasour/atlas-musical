@@ -13,6 +13,7 @@
 Atlas Musical transforme une collection de pistes en carte interactive pour choisir une ambiance, préparer un montage ou documenter un corpus :
 
 - carte valence/arousal, couleur de tension et ellipse de confiance ;
+- clusters de similarité nommés automatiquement et visualisés en bulles, avec filtre et tri dédiés ;
 - filtres par famille, tags, BPM, durée, confiance et favoris ;
 - presets d’usage cinéma (ouverture, transition, paysage, action, portrait, résolution) ;
 - fiche détaillée : tonalité, arc temporel, hook, points de coupe, tags, usages, licence et pistes proches ;
@@ -63,7 +64,7 @@ python3 server.py
 
 Ouvrir ensuite <http://127.0.0.1:8765/>.
 
-`analysis.download` récupère les sources, normalise en WAV et encode les MP3 localement. `analysis.analyze` construit `data/library.sqlite`, `data/library.json`, `data/manifest.json` et `CREDITS.md`. `analysis.validate` produit `data/validation.json`.
+`analysis.download` récupère les sources, normalise en WAV et encode les MP3 localement. `analysis.analyze` construit `data/library.sqlite`, `data/library.json`, `data/manifest.json`, `data/clusters.json` et `CREDITS.md`. `analysis.validate` produit `data/validation.json`.
 
 ### Étendre le catalogue localement
 
@@ -77,6 +78,17 @@ python3 -m analysis.validate
 ```
 
 Traiter par lots de 50 permet de valider la qualité avant de continuer. `analysis.download` et `analysis.analyze` sont incrémentaux : les pistes déjà traitées sont ignorées. Options utiles : `--family acoustique|cinematique|tropical|intense`, `--per-query`, `--workers`, `--min-duration`, `--max-duration`, `--min-views`, `--channels-only` (uniquement des chaînes d’auteurs CC de confiance), `--no-channels` (recherche seule). Par défaut, la découverte privilégie des chaînes d’auteurs CC puis complète par une recherche, en écartant les reprises, tutoriels et compilations.
+
+### Clusters de similarité
+
+L’analyse regroupe aussi les pistes par similarité et écrit `data/clusters.json`. Les groupes sont nommés à partir de leurs tags dominants (par exemple « Littoral », « Nuit/route », « Nostalgie & apaisement ») puis projetés en 2D pour être affichés comme des bulles. Dans l’interface, l’onglet **Clusters de similarité** permet de filtrer la bibliothèque en cliquant une bulle ; le cluster apparaît aussi dans la liste, la fiche détaillée et le tri.
+
+```bash
+python3 -m analysis.cluster              # recalcule les groupes seuls
+python3 -m analysis.cluster --clusters 6 # impose un nombre de groupes
+```
+
+La méthode (Ward, silhouette, ACP, nommage) est décrite dans [`METHODOLOGY.md`](METHODOLOGY.md). Le fichier `data/clusters.json` est local et ignoré par Git.
 
 ### Lancer uniquement l’interface et l’API
 

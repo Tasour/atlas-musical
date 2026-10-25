@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#000000">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <title>Atlas Musical — carte affective</title>
-  <link rel="stylesheet" href="/styles.css?v=2">
+  <link rel="stylesheet" href="/styles.css?v=5">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -68,7 +68,7 @@
         <div class="panel-head">
           <div>
             <h2>Filtres</h2>
-            <p class="micro">Affiner les 20 pistes</p>
+            <p class="micro" id="filterHint">Affiner les pistes</p>
           </div>
           <button class="icon-btn" id="resetFilters" type="button" title="Réinitialiser les filtres" aria-label="Réinitialiser les filtres">
             <svg class="icon"><use href="#i-reset"></use></svg>
@@ -84,6 +84,11 @@
         <section class="filter-section">
           <h3>Familles</h3>
           <div class="chips" id="familyFilters"></div>
+        </section>
+
+        <section class="filter-section" id="clusterSection" hidden>
+          <h3>Clusters <span class="hint">similarité</span></h3>
+          <div class="chips" id="clusterFilters"></div>
         </section>
 
         <section class="filter-section">
@@ -120,14 +125,18 @@
         <div class="panel map-panel">
           <div class="panel-head map-head">
             <div>
-              <h2>Carte émotionnelle</h2>
-              <p class="micro">Cliquer une piste pour l’écouter au hook · couleur = tension · taille = confiance</p>
+              <h2 id="mapTitle">Carte émotionnelle</h2>
+              <p class="micro" id="mapSubtitle">Cliquer une piste pour l’écouter au hook · couleur = tension · taille = confiance</p>
             </div>
             <div class="map-legend" aria-label="Légende">
               <span><i class="dot calm"></i> calme</span>
               <span><i class="dot tense"></i> tendu</span>
               <span><i class="ring"></i> confiance</span>
             </div>
+          </div>
+          <div class="view-tabs" id="viewTabs" role="tablist" aria-label="Type de carte">
+            <button class="view-tab active" type="button" role="tab" aria-selected="true" data-view="affect">Carte affective</button>
+            <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="clusters">Clusters de similarité</button>
           </div>
           <div class="map-wrap" id="mapWrap">
             <svg id="emotionMap" viewBox="0 0 900 620" role="img" aria-label="Carte valence-arousal des pistes">
@@ -161,6 +170,25 @@
             <div class="tooltip" id="mapTooltip" hidden></div>
             <div class="map-readout" id="mapReadout">Survolez la carte pour lire une position.</div>
           </div>
+          <div class="map-wrap cluster-wrap" id="clusterWrap" hidden>
+            <svg id="clusterMap" viewBox="0 0 900 620" role="img" aria-label="Carte des groupes de pistes par similarité">
+              <defs>
+                <filter id="clusterGlow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feGaussianBlur stdDeviation="10" result="b"/>
+                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+              <rect x="0" y="0" width="900" height="620" fill="transparent"/>
+              <g id="clusterBubbles"></g>
+            </svg>
+            <div class="cluster-legend">
+              <span><i class="bubble-key"></i> groupe</span>
+              <span>taille = nombre de pistes</span>
+              <span>cliquer pour filtrer</span>
+            </div>
+            <div class="tooltip" id="clusterTooltip" hidden></div>
+            <div class="map-readout" id="clusterReadout">Chaque bulle regroupe les pistes qui se ressemblent.</div>
+          </div>
           <div class="map-footer">
             <div class="presets" id="presets" aria-label="Presets cinéma">
               <button type="button" class="chip active" data-preset="Tout">Tout</button>
@@ -187,6 +215,7 @@
                 <option value="energy">Énergie</option>
                 <option value="valence">Valence</option>
                 <option value="tension">Tension</option>
+                <option value="cluster">Cluster</option>
                 <option value="bpm">BPM</option>
                 <option value="duration">Durée</option>
                 <option value="title">Titre</option>
@@ -260,6 +289,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=2"></script>
+  <script src="/app.js?v=5"></script>
 </body>
 </html>

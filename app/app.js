@@ -23,6 +23,7 @@ const SORT_LABELS = {
   bpm: "BPM",
   duration: "durée",
   title: "titre",
+  cluster: "cluster",
 };
 
 const MAP = { width: 900, height: 620, pad: 58 };
@@ -32,6 +33,9 @@ const state = {
   tracks: [],
   tags: [],
   families: [],
+  clusters: null,
+  clusterById: new Map(),
+  view: "affect",
   favorites: new Set(),
   selectedId: null,
   currentId: null,
@@ -46,6 +50,7 @@ const state = {
     q: "",
     families: new Set(),
     tags: new Set(),
+    clusters: new Set(),
     bpmMin: 0,
     bpmMax: 240,
     durMin: 0,
@@ -105,6 +110,26 @@ function tagMeta(name) {
   return state.tags.find((t) => t.name === name) || { color: "var(--accent)", category: "autre" };
 }
 
+function clustersAvailable() {
+  return Boolean(state.clusters && Array.isArray(state.clusters.clusters) && state.clusters.clusters.length);
+}
+
+function clusterFor(track) {
+  return track && track.cluster ? state.clusterById.get(track.cluster) || null : null;
+}
+
+function clusterBadge(track, extra = "") {
+  const cluster = clusterFor(track);
+  if (!cluster) return "";
+  return `<span class="cluster-badge${extra ? ` ${extra}` : ""}" style="--cluster:${cluster.color}" title="${esc(cluster.description || "")}"><i></i>${esc(cluster.name)}</span>`;
+}
+
+function clusterLabelLines(name) {
+  const parts = String(name || "").split(/\s*&\s*|\s*·\s*/).filter(Boolean);
+  if (parts.length >= 2) return [parts[0], `& ${parts[1]}`];
+  return [String(name || "")];
+}
+
 function effective(track) {
   const a = track.annotation || {};
   const has = (key) => a[key] !== null && a[key] !== undefined;
@@ -145,6 +170,7 @@ function trackMatches(track) {
     if (!hay.includes(f.q)) return false;
   }
   if (f.families.size && !f.families.has(track.family)) return false;
+  if (f.clusters.size && !f.clusters.has(track.cluster)) return false;
   for (const tag of f.tags) {
     if (!tags.includes(tag)) return false;
   }
@@ -172,6 +198,11 @@ function filteredTracks() {
   const sort = state.sort;
   list.sort((a, b) => {
     if (sort === "title") return a.title.localeCompare(b.title, "fr");
+    if (sort === "cluster") {
+      const left = clusterFor(a)?.name || "";
+      const right = clusterFor(b)?.name || "";
+      return left.localeCompare(right, "fr") || relevance(b) - relevance(a);
+    }
     if (sort === "bpm") return (Number(a.bpm) || 0) - (Number(b.bpm) || 0);
     if (sort === "duration") return (Number(a.duration) || 0) - (Number(b.duration) || 0);
     if (sort === "energy") return (Number(b.energy) || 0) - (Number(a.energy) || 0);
@@ -199,6 +230,21 @@ function renderFilters() {
       return `<button class="chip${active ? " active" : ""}" type="button" data-family="${esc(family)}" aria-pressed="${active}">${esc(FAMILY_SHORT[family] || family)} <span class="count">${count}</span></button>`;
     })
     .join("");
+
+  const clusterSection = $("#clusterSection");
+  if (clustersAvailable()) {
+    clusterSection.hidden = false;
+    $("#clusterFilters").innerHTML = [...state.clusters.clusters]
+      .sort((a, b) => b.size - a.size)
+      .map((cluster) => {
+        const active = state.filters.clusters.has(cluster.id);
+        return `<button class="chip cluster-chip${active ? " active" : ""}" type="button" data-cluster-filter="${esc(cluster.id)}" aria-pressed="${active}" style="--tag:${cluster.color}" title="${esc(cluster.description || "")}"><i class="dot"></i>${esc(cluster.name)} <span class="count">${cluster.size}</span></button>`;
+      })
+      .join("");
+  } else {
+    clusterSection.hidden = true;
+    $("#clusterFilters").innerHTML = "";
+  }
 
   const tagHost = $("#tagFilters");
   const categories = [
@@ -228,6 +274,7 @@ function renderFilters() {
   $("#confOut").value = `${state.filters.confMin} %`;
   $("#favoritesOnly").checked = state.filters.favoritesOnly;
   const filtered = filteredTracks().length;
+  $("#filterHint").textContent = `${state.tracks.length} pistes`;
   $("#filterSummary").textContent = `${filtered} / ${state.tracks.length} pistes`;
 }
 
@@ -354,6 +401,139 @@ function hideTooltip() {
   tooltip.hidden = true;
 }
 
+const CLUSTER_PAD = 72;
+
+function renderClusterMap() {
+  const host = $("#clusterBubbles");
+  if (!clustersAvailable()) {
+    host.innerHTML = "";
+    $("#clusterReadout").textContent = "Clusters indisponibles : relancer l’analyse.";
+    return;
+  }
+  const { width, height } = MAP;
+  const innerW = width - CLUSTER_PAD * 2;
+  const innerH = height - CLUSTER_PAD * 2;
+  const scale = Math.min(innerW, innerH);
+  const active = state.filters.clusters;
+  const hasActive = active.size > 0;
+
+  host.innerHTML = state.clusters.clusters
+    .map((cluster) => {
+      const cx = CLUSTER_PAD + cluster.x * innerW;
+      const cy = height - CLUSTER_PAD - cluster.y * innerH;
+      const radius = Math.max(28, Number(cluster.r || 0.06) * scale);
+      const halo = Math.max(8, Number(cluster.spread || 0.04) * scale * 0.65);
+      const isActive = active.has(cluster.id);
+      const dimmed = hasActive && !isActive;
+      const lines = clusterLabelLines(cluster.name);
+      const font = Math.max(11, Math.min(15, radius / 5.2));
+      const label = lines
+        .map((line, index) => `<tspan x="${cx.toFixed(1)}" y="${(cy - (lines.length > 1 ? 9 : 3) + index * (font + 2)).toFixed(1)}">${esc(line)}</tspan>`)
+        .join("");
+      const countY = cy + (lines.length > 1 ? font + 12 : 14);
+      return `<g class="cluster-bubble${isActive ? " active" : ""}${dimmed ? " dimmed" : ""}" data-cluster="${esc(cluster.id)}" tabindex="0" role="button" aria-pressed="${isActive}" aria-label="${esc(cluster.name)} — ${cluster.size} pistes" style="--cluster:${cluster.color}">
+        <circle class="bubble-halo" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(radius + halo).toFixed(1)}"></circle>
+        <circle class="bubble" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${radius.toFixed(1)}"></circle>
+        <text class="bubble-name" style="font-size:${font.toFixed(1)}px" text-anchor="middle">${label}</text>
+        <text class="bubble-count" x="${cx.toFixed(1)}" y="${countY.toFixed(1)}" text-anchor="middle">${cluster.size} pistes</text>
+      </g>`;
+    })
+    .join("");
+
+  $$("#clusterBubbles .cluster-bubble").forEach((node) => {
+    const cluster = state.clusterById.get(node.dataset.cluster);
+    if (!cluster) return;
+    node.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleClusterFilter(cluster.id);
+    });
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleClusterFilter(cluster.id);
+      }
+    });
+    node.addEventListener("mouseenter", (event) => showClusterTooltip(cluster, event));
+    node.addEventListener("mousemove", (event) => moveClusterTooltip(event));
+    node.addEventListener("mouseleave", hideClusterTooltip);
+    node.addEventListener("focus", () => {
+      const rect = node.getBoundingClientRect();
+      showClusterTooltip(cluster, { clientX: rect.left + rect.width / 2, clientY: rect.top });
+    });
+    node.addEventListener("blur", hideClusterTooltip);
+  });
+}
+
+function clusterHash() {
+  if (state.view !== "clusters") return "";
+  const ids = [...state.filters.clusters];
+  return ids.length === 1 ? `#clusters=${ids[0]}` : "#clusters";
+}
+
+function updateHash() {
+  const hash = clusterHash();
+  const target = hash || window.location.pathname + window.location.search;
+  if (window.location.hash !== hash) window.history.replaceState(null, "", target);
+}
+
+function toggleClusterFilter(clusterId) {
+  if (!clusterId) return;
+  if (state.filters.clusters.has(clusterId)) state.filters.clusters.delete(clusterId);
+  else state.filters.clusters.add(clusterId);
+  updateHash();
+  renderFilters();
+  renderClusterMap();
+  renderList();
+}
+
+function showClusterTooltip(cluster, event) {
+  const tip = $("#clusterTooltip");
+  tip.innerHTML = `<strong>${esc(cluster.name)}</strong>
+    <div class="t-artist">${esc(cluster.description || "")}</div>
+    <div class="t-tags">${(cluster.top_tags || []).slice(0, 4).map((tag) => `<span class="t-tag" style="--tag:${cluster.color}">${esc(tag.name)}</span>`).join("")}</div>`;
+  tip.hidden = false;
+  $("#clusterReadout").textContent = `${cluster.name} · ${cluster.size} pistes · cliquer pour filtrer`;
+  moveClusterTooltip(event);
+}
+
+function moveClusterTooltip(event) {
+  const wrap = $("#clusterWrap").getBoundingClientRect();
+  const tip = $("#clusterTooltip");
+  const x = event.clientX - wrap.left;
+  const y = event.clientY - wrap.top;
+  const tw = tip.offsetWidth || 240;
+  const th = tip.offsetHeight || 100;
+  const left = x + 14 + tw > wrap.width ? x - tw - 14 : x + 14;
+  const top = Math.max(8, Math.min(wrap.height - th - 8, y - th / 2));
+  tip.style.left = `${Math.max(8, left)}px`;
+  tip.style.top = `${top}px`;
+}
+
+function hideClusterTooltip() {
+  $("#clusterTooltip").hidden = true;
+  $("#clusterReadout").textContent = "Chaque bulle regroupe les pistes qui se ressemblent.";
+}
+
+function setView(view) {
+  if (view === "clusters" && !clustersAvailable()) return;
+  state.view = view;
+  const affect = view === "affect";
+  $("#mapWrap").hidden = !affect;
+  $("#clusterWrap").hidden = affect;
+  $$("#viewTabs .view-tab").forEach((button) => {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  $("#mapTitle").textContent = affect ? "Carte émotionnelle" : "Clusters de similarité";
+  $("#mapSubtitle").textContent = affect
+    ? "Cliquer une piste pour l’écouter au hook · couleur = tension · taille = confiance"
+    : "Chaque bulle regroupe des pistes similaires · taille = effectif · cliquer pour filtrer";
+  updateHash();
+  if (affect) renderMap();
+  else renderClusterMap();
+}
+
 function renderList() {
   const list = filteredTracks();
   $("#resultCount").textContent = list.length;
@@ -373,7 +553,7 @@ function renderList() {
         <button class="track-play" type="button" data-play="${esc(track.id)}" aria-label="Écouter ${esc(track.title)}">${icon("play")}</button>
         <div class="track-main">
           <div class="track-title">${esc(track.title)} ${eff.manual ? '<span class="track-manual">manuel</span>' : ""}</div>
-          <div class="track-artist">${esc(track.artist)} · ${esc(FAMILY_SHORT[track.family] || track.family)}</div>
+          <div class="track-artist">${esc(track.artist)} · ${esc(FAMILY_SHORT[track.family] || track.family)} ${clusterBadge(track)}</div>
           <div class="track-tags">${tags.slice(0, 4).map((tag) => `<span style="${tagColorStyle(tag)}">${esc(tag)}</span>`).join("")}</div>
         </div>
         <div class="track-side">
@@ -463,6 +643,7 @@ function renderDetail() {
     .slice(0, 6);
   const usages = Object.entries(track.usage_scores || {}).sort((x, y) => y[1] - x[1]);
   const similar = similarTracks(track);
+  const cluster = clusterFor(track);
   const manualBadge = eff.manual ? `<span class="badge-manual">annotation manuelle</span>` : "";
   const cuts = (track.cut_points || [])
     .map((time) => `<button type="button" data-time="${Number(time)}">${fmtTime(time)}</button>`)
@@ -476,6 +657,7 @@ function renderDetail() {
       <div class="detail-kicker">${esc(FAMILY_SHORT[track.family] || track.family)} · ${esc(track.genre)} ${manualBadge}</div>
       <h2>${esc(track.title)}</h2>
       <div class="detail-artist">${esc(track.artist)}</div>
+      ${cluster ? `<button class="cluster-link" type="button" data-cluster-link="${esc(cluster.id)}" style="--cluster:${cluster.color}"><i></i>${esc(cluster.name)} · ${cluster.size} pistes</button>` : ""}
       <div class="detail-tags">${tags.map((tag) => tagChip(tag)).join("")}</div>
       <div class="detail-actions">
         <button class="btn primary" type="button" data-action="play-hook">${icon("play")} Écouter le hook</button>
@@ -494,6 +676,12 @@ function renderDetail() {
         <div class="stat"><span>Hook</span><b>${fmtTime(track.hook_start)} (+${Math.round(track.hook_duration || 12)} s)</b></div>
       </div>
     </div>
+
+    ${cluster ? `<div class="detail-section">
+      <h3>Cluster de similarité</h3>
+      <p class="cluster-desc">${esc(cluster.description || "")}</p>
+      <div class="chips cluster-tags">${(cluster.top_tags || []).map((tag) => `<span class="chip compact" style="--tag:${cluster.color}"><i class="dot"></i>${esc(tag.name)}</span>`).join("")}</div>
+    </div>` : ""}
 
     <div class="detail-section">
       <h3>Profil affectif estimé</h3>
@@ -610,7 +798,8 @@ function renderPlayer() {
 function renderAll() {
   renderFilters();
   renderPresets();
-  renderMap();
+  if (state.view === "clusters") renderClusterMap();
+  else renderMap();
   renderList();
   renderDetail();
   renderPlayer();
@@ -892,6 +1081,16 @@ function bindEvents() {
     renderList();
   });
 
+  $("#viewTabs").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-view]");
+    if (button) setView(button.dataset.view);
+  });
+
+  $("#clusterFilters").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cluster-filter]");
+    if (button) toggleClusterFilter(button.dataset.clusterFilter);
+  });
+
   $("#familyFilters").addEventListener("click", (event) => {
     const button = event.target.closest("[data-family]");
     if (!button) return;
@@ -960,7 +1159,7 @@ function bindEvents() {
   });
 
   $("#resetFilters").addEventListener("click", () => {
-    state.filters = { q: "", families: new Set(), tags: new Set(), bpmMin: 0, bpmMax: 240, durMin: 0, durMax: 20, confMin: 0, favoritesOnly: false };
+    state.filters = { q: "", families: new Set(), tags: new Set(), clusters: new Set(), bpmMin: 0, bpmMax: 240, durMin: 0, durMax: 20, confMin: 0, favoritesOnly: false };
     state.preset = "Tout";
     state.sort = "relevance";
     $("#searchInput").value = "";
@@ -1014,6 +1213,14 @@ function bindEvents() {
       }
       if (action.dataset.action === "fav") toggleFavorite(track.id);
       if (action.dataset.action === "clear-annotation") clearAnnotation(track);
+      return;
+    }
+    const clusterLink = event.target.closest("[data-cluster-link]");
+    if (clusterLink) {
+      state.filters.clusters = new Set([clusterLink.dataset.clusterLink]);
+      setView("clusters");
+      renderFilters();
+      renderList();
       return;
     }
     const cut = event.target.closest("[data-time]");
@@ -1160,6 +1367,7 @@ function bindEvents() {
       closeModal();
       $("#exportMenu").hidden = true;
       hideTooltip();
+      hideClusterTooltip();
       $("#searchInput").blur();
     } else if (event.code === "Space" && !typing) {
       event.preventDefault();
@@ -1242,10 +1450,26 @@ async function init() {
     state.tracks = state.library.tracks || [];
     state.tags = state.library.tags || [];
     state.families = Array.from(new Set(state.tracks.map((t) => t.family))).sort();
+    state.clusters = state.library.clusters || null;
+    state.clusterById = new Map((state.clusters?.clusters || []).map((cluster) => [cluster.id, cluster]));
     if (themeResponse.ok) applyTheme(await themeResponse.json());
-    $("#subtitle").textContent = `${state.tracks.length} pistes · ${state.tags.length} tags · modèle ${state.library.meta.model_version}`;
+    const clusterCount = clustersAvailable() ? state.clusters.clusters.length : 0;
+    const clusterTab = $('#viewTabs [data-view="clusters"]');
+    if (!clustersAvailable()) {
+      clusterTab.disabled = true;
+      clusterTab.title = "Clusters indisponibles : lancer python -m analysis.cluster";
+    }
+    $("#subtitle").textContent = `${state.tracks.length} pistes · ${state.tags.length} tags · ${clusterCount} clusters · modèle ${state.library.meta.model_version}`;
+    const hashMatch = window.location.hash.match(/^#clusters(?:=([A-Za-z0-9_-]+))?$/);
+    if (hashMatch && clustersAvailable()) {
+      state.view = "clusters";
+      if (hashMatch[1] && state.clusterById.has(hashMatch[1])) {
+        state.filters.clusters.add(hashMatch[1]);
+      }
+    }
     if (state.tracks.length) state.selectedId = state.tracks[0].id;
     renderAll();
+    setView(state.view);
   } catch (error) {
     $("#subtitle").textContent = "Erreur de chargement";
     $("#trackList").innerHTML = `<div class="track-empty">${esc(error.message || "Bibliothèque indisponible.")}</div>`;

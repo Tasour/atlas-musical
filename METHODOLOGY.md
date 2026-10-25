@@ -31,6 +31,14 @@ La carte est une lecture opérationnelle du circumplex de Russell (1980), enrich
 5. Attribution de tags multi-étiquettes et de scores d’usage cinéma.
 6. Écriture de `data/library.sqlite` (canonique), `data/library.json` (snapshot) et `data/validation.json` (stabilité).
 
+## Clusters de similarité
+
+Une seconde lecture, indépendante de la carte affective, regroupe les pistes qui se ressemblent. L’espace combine les 16 scores de tags, les trois axes affectifs et quatre descripteurs (énergie, BPM, acousticité, danceabilité), standardisés puis pondérés. Une classification ascendante hiérarchique de Ward est coupée entre 3 et 9 groupes ; le nombre retenu maximise la silhouette, avec au moins trois pistes par groupe.
+
+Chaque groupe est nommé par ses tags les plus surreprésentés par rapport au corpus. Un tag très spécifique (fort lift ou score moyen élevé) sert directement de nom ; sinon le nom combine les deux tags dominants. La description ajoute la famille majoritaire et les moyennes affectives. Les groupes sont projetés en 2D par ACP, puis un layout de répulsion limite les chevauchements. La taille de la bulle représente l’effectif, le halo la dispersion des pistes.
+
+Ces groupes sont **descriptifs** : ils résument des proximités dans l’espace de features, pas des genres musicaux validés. Les noms et les frontières doivent être vérifiés à l’écoute, et le nombre de groupes peut être imposé avec `analysis.cluster --clusters`.
+
 ## Descripteurs
 
 - **Rythme** : tempo, clarté de pulse (concentration du tempogramme 40–200 BPM, `(pic − moyenne)/pic`), confiance de tempo (`1,2 × clarté`, bornée), nombre de temps, taux d’onsets.

@@ -539,6 +539,19 @@ def main() -> int:
     write_json(MANIFEST, manifest)
     (ROOT / "CREDITS.md").write_text(build_credits(rows), encoding="utf-8")
 
+    try:
+        try:
+            from .cluster import build_and_write as build_clusters
+        except ImportError:
+            from cluster import build_and_write as build_clusters
+        clusters = build_clusters(library)
+        print(
+            f"CLUSTERS : {len(clusters['clusters'])} groupes "
+            f"(silhouette {clusters['silhouette']:+.3f})"
+        )
+    except Exception as exc:
+        print(f"[clusters] échec : {exc}", file=sys.stderr)
+
     print(f"OK : {len(tracks_json)} pistes, {len(tag_list)} tags")
     print(f"DB : {DB}")
     print(f"JSON : {LIB_JSON}")

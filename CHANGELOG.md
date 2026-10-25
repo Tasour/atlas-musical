@@ -6,6 +6,8 @@ Toutes les dates sont au format AAAA-MM-JJ.
 
 ### Ajouté
 
+- Clusters de similarité : regroupement Ward, nommage automatique par tags dominants, projection ACP et bulles interactives.
+- Filtre, tri et fiche détaillée par cluster ; endpoint `GET /api/clusters`.
 - Bouton de téléchargement MP3 sur chaque piste de la liste.
 - Endpoint `GET /api/download/{id}` avec nom de fichier lisible `Artiste - Titre.mp3`.
 

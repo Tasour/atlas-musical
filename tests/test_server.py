@@ -51,3 +51,56 @@ def test_download_returns_attachment(tmp_path, monkeypatch):
     assert "attachment" in disposition
     assert "Artiste test - Titre test.mp3" in disposition
     assert response.content == b"ID3\x04test"
+
+
+def test_clusters_requires_generation(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CLUSTERS_JSON", tmp_path / "missing.json")
+
+    response = TestClient(server.app).get("/api/clusters")
+
+    assert response.status_code == 503
+    assert "analysis.cluster" in response.json()["detail"]
+
+
+def test_clusters_returns_payload(tmp_path, monkeypatch):
+    payload = {
+        "k": 2,
+        "clusters": [{"id": "c1", "name": "Test"}],
+        "assignments": {"t1": "c1"},
+    }
+    path = tmp_path / "clusters.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(server, "CLUSTERS_JSON", path)
+
+    response = TestClient(server.app).get("/api/clusters")
+
+    assert response.status_code == 200
+    assert response.json()["k"] == 2
+
+
+def test_library_merges_cluster_assignments(tmp_path, monkeypatch):
+    library = tmp_path / "library.json"
+    library.write_text(
+        json.dumps({"tracks": [{"id": "t1", "title": "Titre"}]}), encoding="utf-8"
+    )
+    clusters = tmp_path / "clusters.json"
+    clusters.write_text(
+        json.dumps(
+            {
+                "clusters": [{"id": "c1", "name": "Littoral", "color": "teal"}],
+                "assignments": {"t1": "c1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "LIB_JSON", library)
+    monkeypatch.setattr(server, "CLUSTERS_JSON", clusters)
+    monkeypatch.setattr(server, "DB", tmp_path / "missing.sqlite")
+
+    payload = server.merged_library()
+
+    track = payload["tracks"][0]
+    assert track["cluster"] == "c1"
+    assert track["cluster_name"] == "Littoral"
+    assert track["cluster_color"] == "teal"
+    assert payload["clusters"]["clusters"][0]["name"] == "Littoral"

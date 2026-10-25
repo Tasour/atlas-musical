@@ -29,6 +29,7 @@ APP_DIR = ROOT / "app"
 DATA = ROOT / "data"
 DB = DATA / "library.sqlite"
 LIB_JSON = DATA / "library.json"
+CLUSTERS_JSON = DATA / "clusters.json"
 AUDIO = ROOT / "audio"
 EXPORTS = DATA / "exports"
 EXPORTS.mkdir(parents=True, exist_ok=True)
@@ -69,12 +70,32 @@ def annotations() -> dict[str, dict]:
     return out
 
 
+def read_clusters() -> dict:
+    if not CLUSTERS_JSON.exists():
+        return {}
+    try:
+        return json.loads(CLUSTERS_JSON.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def merged_library() -> dict:
     lib = read_library()
     anns = annotations()
+    clusters = read_clusters()
+    assignments = clusters.get("assignments", {})
+    by_id = {cluster["id"]: cluster for cluster in clusters.get("clusters", [])}
     for track in lib.get("tracks", []):
         if track["id"] in anns:
             track["annotation"] = anns[track["id"]]
+        cluster_id = assignments.get(track["id"])
+        if cluster_id:
+            cluster = by_id.get(cluster_id, {})
+            track["cluster"] = cluster_id
+            track["cluster_name"] = cluster.get("name")
+            track["cluster_color"] = cluster.get("color")
+    if clusters:
+        lib["clusters"] = clusters
     return lib
 
 
@@ -178,6 +199,16 @@ def health() -> dict:
 @app.get("/api/library")
 def library() -> dict:
     return merged_library()
+
+
+@app.get("/api/clusters")
+def clusters() -> dict:
+    payload = read_clusters()
+    if not payload:
+        raise HTTPException(
+            503, "Clusters indisponibles : lancer python -m analysis.cluster"
+        )
+    return payload
 
 
 @app.get("/api/track/{track_id}")
