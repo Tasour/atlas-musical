@@ -1,12 +1,22 @@
-"""Catalogue des 20 titres de la bibliothèque.
+"""Catalogue des titres de la bibliothèque.
 
 Les métadonnées (titre, artiste, licence) sont éditoriales ; `source_title`
 est récupéré par yt-dlp au téléchargement et conservé dans le manifeste.
+
+`PUBLIC_TRACKS` contient les 20 titres du dépôt public. `TRACKS` fusionne ce
+catalogue avec `data/catalog.local.json`, généré localement par
+`analysis/discover.py` et non versionné.
 """
 
 from __future__ import annotations
 
-TRACKS = [
+import json
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+LOCAL_CATALOG = ROOT / "data" / "catalog.local.json"
+
+PUBLIC_TRACKS = [
     {
         "id": "oak-sydney",
         "youtube_id": "OaOBGqF0BtU",
@@ -269,5 +279,37 @@ TRACKS = [
     },
 ]
 
+
+def load_local_tracks() -> list[dict]:
+    if not LOCAL_CATALOG.exists():
+        return []
+    try:
+        payload = json.loads(LOCAL_CATALOG.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(payload, dict):
+        payload = payload.get("tracks", [])
+    if not isinstance(payload, list):
+        return []
+
+    seen_ids = {track["id"] for track in PUBLIC_TRACKS}
+    seen_yt = {track["youtube_id"] for track in PUBLIC_TRACKS}
+    tracks: list[dict] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        track_id = item.get("id")
+        youtube_id = item.get("youtube_id")
+        if not track_id or not youtube_id:
+            continue
+        if track_id in seen_ids or youtube_id in seen_yt:
+            continue
+        seen_ids.add(track_id)
+        seen_yt.add(youtube_id)
+        tracks.append(item)
+    return tracks
+
+
+TRACKS = [*PUBLIC_TRACKS, *load_local_tracks()]
 TRACK_BY_ID = {t["id"]: t for t in TRACKS}
 TRACK_BY_YT = {t["youtube_id"]: t for t in TRACKS}

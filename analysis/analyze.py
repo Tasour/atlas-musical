@@ -542,7 +542,7 @@ def main() -> int:
     print(f"OK : {len(tracks_json)} pistes, {len(tag_list)} tags")
     print(f"DB : {DB}")
     print(f"JSON : {LIB_JSON}")
-    return 0 if len(tracks_json) == len(TRACKS) else 1
+    return 0 if len(tracks_json) == len(ready) else 1
 
 
 if __name__ == "__main__":

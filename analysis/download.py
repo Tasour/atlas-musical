@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Télécharge, normalise et encode les 20 titres du catalogue.
+"""Télécharge, normalise et encode les titres du catalogue.
 
 Sorties :
   work/download/<youtube_id>.<ext>   source yt-dlp

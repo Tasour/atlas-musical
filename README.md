@@ -39,7 +39,7 @@ Ne sont **pas** versionnés :
 - la base SQLite, les snapshots JSON et les exports (`data/`) ;
 - `CREDITS.md`, généré localement par l’analyse.
 
-Le catalogue contient les métadonnées de 20 références d’exemple. Les fichiers audio restent soumis aux licences de leurs auteurs ; consultez les pages source et `CREDITS.md` après génération.
+Le catalogue public contient les métadonnées de 20 références d’exemple. `analysis/discover.py` permet d’en ajouter d’autres localement dans `data/catalog.local.json`, sans les publier. Les fichiers audio restent soumis aux licences de leurs auteurs ; consultez les pages source et `CREDITS.md` après génération.
 
 ## Démarrage rapide
 
@@ -64,6 +64,19 @@ python3 server.py
 Ouvrir ensuite <http://127.0.0.1:8765/>.
 
 `analysis.download` récupère les sources, normalise en WAV et encode les MP3 localement. `analysis.analyze` construit `data/library.sqlite`, `data/library.json`, `data/manifest.json` et `CREDITS.md`. `analysis.validate` produit `data/validation.json`.
+
+### Étendre le catalogue localement
+
+`analysis.discover` recherche sur YouTube des pistes instrumentales sous licence Creative Commons, filtre les doublons et écrit `data/catalog.local.json` (ignoré par Git). Le catalogue public n’est pas modifié.
+
+```bash
+python3 -m analysis.discover --target 50
+python3 -m analysis.download
+python3 -m analysis.analyze
+python3 -m analysis.validate
+```
+
+Traiter par lots de 50 permet de valider la qualité avant de continuer. `analysis.download` et `analysis.analyze` sont incrémentaux : les pistes déjà traitées sont ignorées. Options utiles : `--family acoustique|cinematique|tropical|intense`, `--per-query`, `--workers`, `--min-duration`, `--max-duration`, `--min-views`, `--channels-only` (uniquement des chaînes d’auteurs CC de confiance), `--no-channels` (recherche seule). Par défaut, la découverte privilégie des chaînes d’auteurs CC puis complète par une recherche, en écartant les reprises, tutoriels et compilations.
 
 ### Lancer uniquement l’interface et l’API
 

@@ -1,4 +1,4 @@
-.PHONY: install dev analysis download run test lint
+.PHONY: install dev analysis download discover run test lint
 
 install:
 	python3 -m pip install -e .
@@ -11,6 +11,9 @@ analysis:
 
 download:
 	python3 -m analysis.download
+
+discover:
+	python3 -m analysis.discover --target 50
 
 run:
 	python3 server.py
