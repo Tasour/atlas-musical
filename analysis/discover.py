@@ -65,17 +65,8 @@ QUERIES = {
 }
 
 CHANNELS = {
-    "acoustique": [
-        "https://www.youtube.com/@audionautix/videos",
-        "https://www.youtube.com/@podingtonbear/videos",
-        "https://www.youtube.com/@Cullah/videos",
-        "https://www.youtube.com/@Scandinavianz/videos",
-        "https://www.youtube.com/@Lesfm/videos",
-    ],
+    "acoustique": [],
     "cinematique": [
-        "https://www.youtube.com/@ScottBuckley/videos",
-        "https://www.youtube.com/@GhostrifterOfficial/videos",
-        "https://www.youtube.com/@DarrenCurtisMusic/videos",
         "https://www.youtube.com/@ChrisZabriskie/videos",
         "https://www.youtube.com/@JonnyEaston/videos",
         "https://www.youtube.com/@Sappheiros/videos",
@@ -83,14 +74,17 @@ CHANNELS = {
         "https://www.youtube.com/@Myuu/videos",
         "https://www.youtube.com/@AShamaluevMusic/videos",
         "https://www.youtube.com/@RafaelKrux/videos",
+        "https://www.youtube.com/@GhostrifterOfficial/videos",
+        "https://www.youtube.com/@DarrenCurtisMusic/videos",
+        "https://www.youtube.com/@ScottBuckley/videos",
     ],
     "tropical": [
-        "https://www.youtube.com/@tubebackr/videos",
-        "https://www.youtube.com/@FASSounds/videos",
-        "https://www.youtube.com/@BrokeForFree/videos",
         "https://www.youtube.com/@VlogNoCopyrightMusic/videos",
         "https://www.youtube.com/@eklipsemusic/videos",
         "https://www.youtube.com/@Musicfox/videos",
+        "https://www.youtube.com/@FASSounds/videos",
+        "https://www.youtube.com/@BrokeForFree/videos",
+        "https://www.youtube.com/@tubebackr/videos",
     ],
     "intense": [
         "https://www.youtube.com/@RossBugden/videos",
