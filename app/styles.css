@@ -509,3 +509,10 @@ code { font-family: var(--mono); font-size: .92em; }
   .brief-pill { width: max-content; max-width: 100%; }
   .toolbar-note { margin-left: 0; }
 }
+
+.sl-license { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; color: var(--muted); }
+.sl-license .check { color: var(--fg); }
+
+@media (max-width: 860px) {
+  .search-jump { display: none; }
+}

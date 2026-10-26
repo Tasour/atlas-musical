@@ -23,7 +23,8 @@ Autres fonctions :
 - clusters hiérarchiques nommés automatiquement, avec stabilité bootstrap ;
 - carte valence/arousal, tension, confiance, arc temporel, chroma, tags et usages ;
 - annotations manuelles stockées localement dans SQLite ;
-- export de la short-list en JSON, CSV ou fiche de décision Markdown, avec crédits ;
+- export de la short-list en JSON, CSV, fiche de décision Markdown ou pack ZIP (MP3 + crédits) ;
+- suivi de vérification des licences dans la short-list ;
 - export de la base complète en SQLite, JSON ou ZIP ;
 - thème Omarchy optionnel, avec fallback neutre.
 
@@ -141,6 +142,7 @@ Les dossiers `audio/`, `data/` et `work/` sont créés à l’exécution et igno
 - `GET /api/audio/{id}` (Range supporté)
 - `GET /api/download/{id}` (MP3 en pièce jointe)
 - `GET /api/export?format=sqlite|json|zip`
+- `POST /api/export-selection` (ZIP de la short-list avec MP3 et crédits)
 - `POST /api/annotations`
 - `DELETE /api/annotations/{id}`
 - `GET /api/theme`

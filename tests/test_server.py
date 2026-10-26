@@ -136,3 +136,48 @@ def test_library_merges_hierarchical_cluster_path(tmp_path, monkeypatch):
     assert track["cluster_name"] == "Sous-groupe"
     assert track["cluster_path"] == ["c1", "c1-1"]
     assert track["cluster_path_names"] == ["Racine", "Sous-groupe"]
+
+
+def test_export_selection_zip(tmp_path, monkeypatch):
+    import io
+    import zipfile
+
+    track = {
+        "id": "t1",
+        "youtube_id": "aaaaaaaaaaa",
+        "title": "Titre test",
+        "artist": "Artiste test",
+        "file_path": "audio/t1.mp3",
+        "license": "CC BY 4.0",
+        "credit": "Artiste test",
+        "source_url": "https://example.org",
+        "duration": 120,
+        "bpm": 90,
+    }
+    library = tmp_path / "library.json"
+    library.write_text(json.dumps({"tracks": [track]}), encoding="utf-8")
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    (audio_dir / "t1.mp3").write_bytes(b"ID3\x04test")
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    monkeypatch.setattr(server, "ROOT", tmp_path)
+    monkeypatch.setattr(server, "LIB_JSON", library)
+    monkeypatch.setattr(server, "CLUSTERS_JSON", tmp_path / "missing.json")
+    monkeypatch.setattr(server, "DB", tmp_path / "missing.sqlite")
+    monkeypatch.setattr(server, "EXPORTS", exports)
+
+    response = TestClient(server.app).post(
+        "/api/export-selection",
+        json={"items": [{"id": "t1", "status": "choisi", "note": "plan", "license_checked": True}], "brief": "Action"},
+    )
+
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = archive.namelist()
+        assert "selection.json" in names
+        assert "CREDITS.txt" in names
+        assert "audio/Artiste test - Titre test.mp3" in names
+        selection = json.loads(archive.read("selection.json"))
+        assert selection["items"][0]["license_checked"] is True
+        assert "artiste test" in archive.read("CREDITS.txt").decode().lower()

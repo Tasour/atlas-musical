@@ -175,6 +175,7 @@ function loadShortlist() {
         id: item.id,
         status: STATUS[item.status] ? item.status : "a-ecouter",
         note: String(item.note || ""),
+        licenseChecked: Boolean(item.licenseChecked),
         order: Number.isFinite(item.order) ? item.order : index,
       });
     });
@@ -183,7 +184,7 @@ function loadShortlist() {
     if (Array.isArray(favorites)) {
       favorites.forEach((id, index) => {
         if (typeof id === "string") {
-          entries.set(id, { id, status: "a-ecouter", note: "", order: index });
+          entries.set(id, { id, status: "a-ecouter", note: "", licenseChecked: false, order: index });
         }
       });
     }
@@ -228,7 +229,7 @@ function addToShortlist(id, status = "a-ecouter") {
     showToast(`Déjà dans la short-list · ${STATUS[existing.status]}`);
     return;
   }
-  state.shortlist.set(id, { id, status, note: "", order: nextOrder() });
+  state.shortlist.set(id, { id, status, note: "", licenseChecked: false, order: nextOrder() });
   saveShortlist();
   showToast(`Ajouté à la short-list · ${STATUS[status]}`);
 }
@@ -257,7 +258,7 @@ function chooseTrack(id, { silent = false } = {}) {
     else if (entry.status === "choisi") entry.status = "retenu";
   }
   if (!state.shortlist.has(id)) {
-    state.shortlist.set(id, { id, status: "choisi", note: "", order: nextOrder() });
+    state.shortlist.set(id, { id, status: "choisi", note: "", licenseChecked: false, order: nextOrder() });
   }
   saveShortlist();
   if (!silent) showToast("Piste choisie. Le crédit est prêt dans la fiche.");
@@ -789,13 +790,13 @@ function bindTrackGrid() {
     button.addEventListener("click", () => {
       const tag = button.dataset.tagFilter;
       state.groupFilters.tag = state.groupFilters.tag === tag ? "" : tag;
-      refreshView();
+      refreshView(`[data-tag-filter="${CSS.escape(tag)}"]`);
     });
   });
   $$("[data-duration-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       state.groupFilters.duration = button.dataset.durationFilter;
-      refreshView();
+      refreshView(`[data-duration-filter="${button.dataset.durationFilter}"]`);
     });
   });
   $$("[data-preview]").forEach((button) => {
@@ -823,13 +824,24 @@ function bindTrackGrid() {
       } else {
         state.compare = state.compare.filter((item) => item !== id);
       }
-      refreshView();
+      refreshView(`[data-compare="${CSS.escape(id)}"]`);
     });
   });
   $$("[data-status]").forEach((select) => {
     select.addEventListener("change", () => {
       setShortlistStatus(select.dataset.status, select.value);
-      refreshView();
+      refreshView(`[data-status="${CSS.escape(select.dataset.status)}"]`);
+    });
+  });
+  $$("[data-license]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const entry = state.shortlist.get(checkbox.dataset.license);
+      if (entry) {
+        entry.licenseChecked = checkbox.checked;
+        saveShortlist();
+        showToast(checkbox.checked ? "Licence marquée vérifiée." : "Licence à revérifier.");
+        refreshView(`[data-license="${CSS.escape(checkbox.dataset.license)}"]`);
+      }
     });
   });
   $$("[data-note]").forEach((input) => {
@@ -980,10 +992,11 @@ function renderShortlist() {
           ? "Écoutez, statuez, comparez. Objectif : 5 à 15 candidates, puis une décision."
           : "Constituez votre sélection de finalistes.",
       `<a class="btn ghost" href="#/groups">${icon("arrow-left")} Explorer</a>
-       <button class="btn primary" type="button" data-export="json" ${entries.length ? "" : "disabled"}>${icon("download")} Exporter la sélection</button>`
+       <button class="btn ghost" type="button" data-export="json" ${entries.length ? "" : "disabled"}>Export JSON</button>
+       <button class="btn primary" type="button" data-export-pack ${entries.length ? "" : "disabled"}>${icon("download")} Pack MP3 + crédits</button>`
     )}
     <div class="toolbar">
-      <span class="micro">${entries.length} piste(s) · ${counts.retenu || 0} retenue(s) · ${counts.choisi || 0} choisie(s)</span>
+      <span class="micro">${entries.length} piste(s) · ${counts.retenu || 0} retenue(s) · ${counts.choisi || 0} choisie(s)${entries.some(({ entry }) => !entry.licenseChecked) ? ` · ${entries.filter(({ entry }) => !entry.licenseChecked).length} licence(s) à vérifier` : " · licences vérifiées"}</span>
       <div class="chips">
         <button class="chip" type="button" data-export="csv" ${entries.length ? "" : "disabled"}>CSV</button>
         <button class="chip" type="button" data-action="copy-credits" ${entries.length ? "" : "disabled"}>Copier les crédits</button>
@@ -996,9 +1009,25 @@ function renderShortlist() {
   $$("[data-status-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       state.shortlistFilter = button.dataset.statusFilter || null;
-      refreshView();
+      refreshView(`[data-status-filter="${CSS.escape(state.shortlistFilter || "")}"]`);
     });
   });
+  const tabList = $(".status-tabs");
+  if (tabList) {
+    tabList.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const tabs = $$("[data-status-filter]", tabList);
+      const current = tabs.indexOf(document.activeElement);
+      if (current < 0) return;
+      event.preventDefault();
+      let next = current;
+      if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+      if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = tabs.length - 1;
+      tabs[next].focus();
+    });
+  }
   bindTrackGrid();
 }
 
@@ -1022,6 +1051,10 @@ function shortlistCard(entry, track) {
       <label class="field-inline grow">Note
         <input type="text" data-note="${esc(track.id)}" value="${esc(entry.note)}" placeholder="Plan, réserve, raison…">
       </label>
+    </div>
+    <div class="sl-license">
+      <span class="micro">${esc(track.license)} · crédit ${esc(track.credit)}</span>
+      <label class="check small"><input type="checkbox" data-license="${esc(track.id)}" ${entry.licenseChecked ? "checked" : ""}> Licence vérifiée</label>
     </div>
     <div class="sl-actions">
       <button class="btn small" type="button" data-preview="${esc(track.id)}">${icon("play")} 12 s</button>
@@ -1399,6 +1432,7 @@ function updateTimeline() {
   $("#timeCurrent").textContent = fmtTime(current);
   $("#timeTotal").textContent = duration ? fmtTime(duration) : "0:00";
   $("#seek").value = duration ? Math.round((current / duration) * 1000) : 0;
+  $("#seek").setAttribute("aria-valuetext", `${fmtTime(current)} sur ${fmtTime(duration)}`);
   const track = currentTrack();
   if (!track || !duration) return;
   const hookStart = Number(track.hook_start) || 0;
@@ -1453,6 +1487,7 @@ function selectionRows() {
         artist: track.artist,
         status: STATUS[entry.status],
         note: entry.note,
+        license_checked: entry.licenseChecked ? "oui" : "non",
         duration: fmtDur(track.duration),
         bpm: Math.round(Number(track.bpm) || 0),
         license: track.license,
@@ -1476,7 +1511,7 @@ function exportSelection(format) {
     return;
   }
   if (format === "csv") {
-    const headers = ["title", "artist", "status", "note", "duration", "bpm", "license", "credit", "source_url", "cluster", "brief"];
+    const headers = ["title", "artist", "status", "note", "license_checked", "duration", "bpm", "license", "credit", "source_url", "cluster", "brief"];
     const escapeCsv = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const csv = [headers.join(","), ...rows.map((row) => headers.map((header) => escapeCsv(row[header])).join(","))].join("\n");
     downloadBlob("atlas-selection.csv", csv, "text/csv");
@@ -1491,9 +1526,9 @@ function exportSelection(format) {
       track ? `**Piste choisie :** ${track.title} — ${track.artist}` : "**Aucune piste choisie**",
       state.brief ? `**Brief :** ${briefSummary()}` : "",
       "",
-      "| Piste | Artiste | Statut | Durée | BPM | Licence |",
-      "|---|---|---|---|---|---|",
-      ...rows.map((row) => `| ${row.title} | ${row.artist} | ${row.status} | ${row.duration} | ${row.bpm} | ${row.license} |`),
+      "| Piste | Artiste | Statut | Licence vérifiée | Durée | BPM | Licence |",
+      "|---|---|---|---|---|---|---|",
+      ...rows.map((row) => `| ${row.title} | ${row.artist} | ${row.status} | ${row.license_checked} | ${row.duration} | ${row.bpm} | ${row.license} |`),
       "",
       "## Crédits",
       "",
@@ -1514,6 +1549,41 @@ function downloadBlob(name, content, type) {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast("Export lancé.");
+}
+
+function exportSelectionPack() {
+  const items = [...state.shortlist.values()].map((entry) => ({
+    id: entry.id,
+    status: entry.status,
+    note: entry.note,
+    license_checked: Boolean(entry.licenseChecked),
+  }));
+  if (!items.length) {
+    showToast("La short-list est vide.");
+    return;
+  }
+  showToast("Préparation du pack MP3…");
+  fetch("/api/export-selection", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items, brief: state.brief ? briefSummary() : "" }),
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error("Export impossible");
+      return response.blob();
+    })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "atlas-selection.zip";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast("Pack MP3 téléchargé.");
+    })
+    .catch((error) => showToast(error.message || "Export impossible.", "error"));
 }
 
 function copyText(text) {
@@ -1686,13 +1756,18 @@ function bindEvents() {
     const action = event.target.closest("[data-action]");
     if (!action) return;
     $("#moreMenu").hidden = true;
-    if (action.dataset.action === "copy-credits") copyCredits();
+    if (action.dataset.action === "export-pack") exportSelectionPack();
+    else if (action.dataset.action === "copy-credits") copyCredits();
     else if (action.dataset.action === "methodology") openDialog("Méthodologie", methodologyHtml());
     else if (action.dataset.action === "credits") openDialog("Crédits", creditsHtml());
     else if (action.dataset.action === "export-base-json") window.location.href = "/api/export?format=json";
     else if (action.dataset.action === "export-base-sqlite") window.location.href = "/api/export?format=sqlite";
   });
 
+  $("#globalSearchBtn").addEventListener("click", () => {
+    navigate("groups");
+    setTimeout(() => $("#searchInput")?.focus(), 80);
+  });
   $("#helpBtn").addEventListener("click", () => openDialog("Aide", helpHtml()));
   $("#dialogClose").addEventListener("click", () => $("#appDialog").close());
   $("#appDialog").addEventListener("click", (event) => {
@@ -1700,6 +1775,11 @@ function bindEvents() {
   });
 
   $("#view").addEventListener("click", (event) => {
+    const exportPack = event.target.closest("[data-export-pack]");
+    if (exportPack) {
+      exportSelectionPack();
+      return;
+    }
     const exportButton = event.target.closest("[data-export]");
     if (exportButton) {
       exportSelection(exportButton.dataset.export);
@@ -1748,7 +1828,7 @@ function bindEvents() {
     const toggle = event.target.closest("[data-toggle-tracks]");
     if (toggle) {
       state.showTracks = !state.showTracks;
-      refreshView();
+      refreshView("[data-toggle-tracks]");
     }
   });
 

@@ -183,6 +183,18 @@ def download_name(track: dict) -> str:
     return f"{base or track.get('id', 'piste')}.mp3"
 
 
+class SelectionItem(BaseModel):
+    id: str
+    status: str = "a-ecouter"
+    note: str = ""
+    license_checked: bool = False
+
+
+class SelectionExport(BaseModel):
+    items: list[SelectionItem] = Field(min_length=1, max_length=20)
+    brief: str = ""
+
+
 @app.get("/api/health")
 def health() -> dict:
     lib = {}
@@ -245,6 +257,79 @@ def download(track_id: str):
         media_type="audio/mpeg",
         filename=download_name(track),
         headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/export-selection")
+def export_selection(payload: SelectionExport):
+    cleanup_exports()
+    lib = merged_library()
+    by_id = {track["id"]: track for track in lib.get("tracks", [])}
+    selected = [
+        (item, by_id[item.id])
+        for item in payload.items
+        if item.id in by_id
+    ]
+    if not selected:
+        raise HTTPException(404, "Aucune piste valide dans la sélection")
+    dest = unique_export(".zip")
+    used_names: set[str] = set()
+    rows = []
+    credit_lines = [
+        "Atlas Musical — sélection",
+        f"Généré le {now()}",
+        f"Brief : {payload.brief or '—'}",
+        "",
+    ]
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        for item, track in selected:
+            row = {
+                "id": track["id"],
+                "title": track.get("title"),
+                "artist": track.get("artist"),
+                "status": item.status,
+                "note": item.note,
+                "license_checked": item.license_checked,
+                "license": track.get("license"),
+                "credit": track.get("credit"),
+                "source_url": track.get("source_url"),
+                "duration": track.get("duration"),
+                "bpm": track.get("bpm"),
+                "cluster_path": track.get("cluster_path_names") or [],
+            }
+            rows.append(row)
+            credit_lines.append(
+                f"- {row['title']} — {row['artist']} · {row['license']} · "
+                f"{row['credit']} · {row['source_url']}"
+            )
+            audio = ROOT / track["file_path"]
+            if not audio.exists():
+                continue
+            name = download_name(track)
+            while name in used_names:
+                base = name[:-4] if name.lower().endswith(".mp3") else name
+                name = f"{base} ({track['id']}).mp3"
+            used_names.add(name)
+            archive.write(audio, f"audio/{name}")
+        archive.writestr(
+            "selection.json",
+            json.dumps(
+                {
+                    "app": "Atlas Musical",
+                    "generated_at": now(),
+                    "brief": payload.brief,
+                    "items": rows,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        archive.writestr("CREDITS.txt", "\n".join(credit_lines) + "\n")
+    return FileResponse(
+        dest,
+        media_type="application/zip",
+        filename="atlas-selection.zip",
+        background=BackgroundTask(lambda: dest.unlink(missing_ok=True)),
     )
 
 
