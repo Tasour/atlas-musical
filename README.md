@@ -22,7 +22,7 @@ Les filtres et la recherche sont encodés dans l’URL (`#/group/c1?tag=Tension&
 
 Autres fonctions :
 
-- clusters hiérarchiques nommés automatiquement, avec stabilité bootstrap ;
+- clusters hiérarchiques nommés automatiquement, avec stabilité bootstrap, silhouette et variance ACP ;
 - carte valence/arousal, tension, confiance, arc temporel, chroma, tags et usages ;
 - annotations manuelles stockées localement dans SQLite ;
 - export de la short-list en JSON, CSV, fiche de décision Markdown ou pack ZIP (MP3 + crédits) ;

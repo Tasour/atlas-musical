@@ -14,6 +14,7 @@ Toutes les dates sont au format AAAA-MM-JJ.
 - Comparateur A/B synchronisé (deux lecteurs, bascule instantanée) et état de recherche/filtres dans l’URL.
 - Recherche débouncée, annonce des changements de vue, menu clavier et focus restauré après les filtres/statuts.
 - Endpoint `/api/library/summary` (payload allégé), chargement à la demande des features et compression gzip.
+- Onboarding one-shot, panneau de qualité des groupes et bannière de décision finale avec pack MP3.
 - Filtre, tri et fiche détaillée par cluster ; endpoint `GET /api/clusters`.
 - Bouton de téléchargement MP3 sur chaque piste de la liste.
 - Endpoint `GET /api/download/{id}` avec nom de fichier lisible `Artiste - Titre.mp3`.

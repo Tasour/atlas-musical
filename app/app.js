@@ -234,6 +234,7 @@ function addToShortlist(id, status = "a-ecouter") {
     return;
   }
   state.shortlist.set(id, { id, status, note: "", licenseChecked: false, order: nextOrder() });
+  localStorage.setItem("atlas:onboarded", "1");
   saveShortlist();
   showToast(`Ajouté à la short-list · ${STATUS[status]}`);
 }
@@ -588,6 +589,7 @@ function renderBrief() {
       dialogue: form.get("dialogue") === "on",
     };
     writeJSON(STORAGE.brief, state.brief);
+    localStorage.setItem("atlas:onboarded", "1");
     navigate("groups");
   });
 }
@@ -604,6 +606,21 @@ function renderGroups() {
     : `<a class="brief-pill" href="#/brief">${icon("plus")} Cadrer le plan (optionnel)</a>`;
   const results = state.search ? searchTracks(state.search) : [];
   const groups = clustersAvailable() ? sortedRoots() : [];
+  const onboarded = localStorage.getItem("atlas:onboarded") === "1";
+  const onboarding = !onboarded && !state.brief && state.shortlist.size === 0
+    ? `<section class="onboarding" aria-label="Premiers pas">
+        <div class="onboarding-steps">
+          <span><b>1</b> Cadrer le plan (optionnel)</span>
+          <span><b>2</b> Explorer un groupe</span>
+          <span><b>3</b> Affiner et garder 5 à 15 pistes</span>
+          <span><b>4</b> Décider et exporter</span>
+        </div>
+        <div class="onboarding-actions">
+          <a class="btn small primary" href="#/brief">Cadrer le plan</a>
+          <button class="btn small ghost" type="button" data-onboard="dismiss">Explorer directement</button>
+        </div>
+      </section>`
+    : "";
   const treemap = groups.length
     ? treemapHtml(
         groups.map(({ node, score }) => ({
@@ -638,6 +655,7 @@ function renderGroups() {
       ${briefLine}
       <span class="toolbar-note">${groups.length ? `${groups.length} groupes · ${state.tracks.length} pistes` : ""}</span>
     </div>
+    ${onboarding}
     ${state.search ? renderSearchResults(results) : treemap}
     <div class="flow-hint">
       <span>${icon("arrow-right")} Cliquez un groupe pour voir ses sous-groupes et ses pistes.</span>
@@ -647,6 +665,12 @@ function renderGroups() {
 
   bindSearch();
   if (state.search) bindTrackGrid();
+  $$("[data-onboard]").forEach((button) => {
+    button.addEventListener("click", () => {
+      localStorage.setItem("atlas:onboarded", "1");
+      refreshView();
+    });
+  });
 }
 
 function sortedRoots() {
@@ -775,6 +799,15 @@ function renderGroup(groupId) {
       ${(node.top_tags || []).slice(0, 4).map((tag) => `<span class="tag" style="--tag:${tagColor(tag.name)}">${esc(tag.name)}</span>`).join("")}
       <span class="micro">${esc(node.description || "")}</span>
     </div>
+    <details class="quality">
+      <summary>Qualité du groupe</summary>
+      <div class="quality-body">
+        <p><strong>Stabilité bootstrap :</strong> ${node.stability ? `${Math.round(node.stability * 100)} %` : "non calculée"} — part des rééchantillonnages où ce groupe est retrouvé.</p>
+        <p><strong>Silhouette :</strong> ${node.silhouette ? Number(node.silhouette).toFixed(2) : "globale " + Number(state.clusters?.silhouette || 0).toFixed(2)} — cohésion interne, plus haut = mieux séparé.</p>
+        <p><strong>ACP :</strong> ${(state.clusters?.pca?.explained_variance || []).slice(0, 3).map((value) => `${Math.round(value * 100)} %`).join(" · ") || "—"} de variance expliquée par les premières composantes.</p>
+        <p class="micro">Ces indicateurs décrivent la partition, pas la qualité musicale. Les noms doivent être confirmés à l’écoute.</p>
+      </div>
+    </details>
     ${body}
   </div>`;
 
@@ -1013,6 +1046,17 @@ function renderShortlist() {
     .map((id) => state.trackById.get(id))
     .filter(Boolean);
 
+  const targetHint = entries.length > 15
+    ? " · au-delà de 15, écartez pour converger"
+    : entries.length > 0 && entries.length < 5
+      ? ` · encore ${5 - entries.length} pour une short-list confortable`
+      : "";
+  const decision = chosen
+    ? `<section class="decision-banner">
+        <div><span class="kicker">Décision</span><strong>${esc(chosen.track.title)}</strong><span>${esc(chosen.track.artist)} · ${esc(chosen.track.license)}</span></div>
+        <div class="chips"><button class="btn small primary" type="button" data-export-pack>${icon("download")} Pack MP3 + crédits</button><button class="btn small ghost" type="button" data-copy-credit="${esc(chosen.track.id)}">${icon("copy")} Copier le crédit</button></div>
+      </section>`
+    : "";
   let body = "";
   if (!entries.length) {
     body = `<div class="empty big">
@@ -1048,8 +1092,9 @@ function renderShortlist() {
        <button class="btn ghost" type="button" data-export="json" ${entries.length ? "" : "disabled"}>Export JSON</button>
        <button class="btn primary" type="button" data-export-pack ${entries.length ? "" : "disabled"}>${icon("download")} Pack MP3 + crédits</button>`
     )}
+    ${decision}
     <div class="toolbar">
-      <span class="micro">${entries.length} piste(s) · ${counts.retenu || 0} retenue(s) · ${counts.choisi || 0} choisie(s)${entries.some(({ entry }) => !entry.licenseChecked) ? ` · ${entries.filter(({ entry }) => !entry.licenseChecked).length} licence(s) à vérifier` : " · licences vérifiées"}</span>
+      <span class="micro">${entries.length} piste(s) · ${counts.retenu || 0} retenue(s) · ${counts.choisi || 0} choisie(s)${entries.some(({ entry }) => !entry.licenseChecked) ? ` · ${entries.filter(({ entry }) => !entry.licenseChecked).length} licence(s) à vérifier` : " · licences vérifiées"}${targetHint}</span>
       <div class="chips">
         <button class="chip" type="button" data-export="csv" ${entries.length ? "" : "disabled"}>CSV</button>
         <button class="chip" type="button" data-action="copy-credits" ${entries.length ? "" : "disabled"}>Copier les crédits</button>
