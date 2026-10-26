@@ -47,9 +47,24 @@ def test_clusters_assign_every_track():
     assert len(payload["clusters"]) == 3
     assert sum(item["size"] for item in payload["clusters"]) == 36
     assert set(payload["assignments"]) == {f"t{i}" for i in range(36)}
-    assert all(0 <= item["x"] <= 1 and 0 <= item["y"] <= 1 for item in payload["clusters"])
+    assert set(payload["paths"]) == {f"t{i}" for i in range(36)}
     assert len({item["name"] for item in payload["clusters"]}) == 3
     assert all(item["name"] for item in payload["clusters"])
+    assert len(payload["nodes"]) >= 3
+    assert all(node["color"] for node in payload["nodes"])
+    assert all(payload["paths"][track_id][-1] == cluster_id for track_id, cluster_id in payload["assignments"].items())
+
+
+def test_hierarchy_children_are_subsets():
+    payload = cluster.build_clusters(make_library(), k=3)
+    nodes = {node["id"]: node for node in payload["nodes"]}
+    for node in nodes.values():
+        if not node["children"]:
+            continue
+        children = [nodes[child_id] for child_id in node["children"]]
+        assert all(child["parent"] == node["id"] for child in children)
+        union = {track_id for child in children for track_id in child["track_ids"]}
+        assert union == set(node["track_ids"])
 
 
 def test_clusters_choose_k_automatically():

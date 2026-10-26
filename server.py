@@ -84,7 +84,9 @@ def merged_library() -> dict:
     anns = annotations()
     clusters = read_clusters()
     assignments = clusters.get("assignments", {})
-    by_id = {cluster["id"]: cluster for cluster in clusters.get("clusters", [])}
+    nodes = clusters.get("nodes") or clusters.get("clusters", [])
+    by_id = {node["id"]: node for node in nodes}
+    paths = clusters.get("paths", {})
     for track in lib.get("tracks", []):
         if track["id"] in anns:
             track["annotation"] = anns[track["id"]]
@@ -94,6 +96,11 @@ def merged_library() -> dict:
             track["cluster"] = cluster_id
             track["cluster_name"] = cluster.get("name")
             track["cluster_color"] = cluster.get("color")
+            path = paths.get(track["id"], [])
+            track["cluster_path"] = path
+            track["cluster_path_names"] = [
+                by_id.get(node_id, {}).get("name") for node_id in path
+            ]
     if clusters:
         lib["clusters"] = clusters
     return lib

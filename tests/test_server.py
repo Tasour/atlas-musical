@@ -104,3 +104,35 @@ def test_library_merges_cluster_assignments(tmp_path, monkeypatch):
     assert track["cluster_name"] == "Littoral"
     assert track["cluster_color"] == "teal"
     assert payload["clusters"]["clusters"][0]["name"] == "Littoral"
+
+
+def test_library_merges_hierarchical_cluster_path(tmp_path, monkeypatch):
+    library = tmp_path / "library.json"
+    library.write_text(
+        json.dumps({"tracks": [{"id": "t1", "title": "Titre"}]}), encoding="utf-8"
+    )
+    clusters = tmp_path / "clusters.json"
+    clusters.write_text(
+        json.dumps(
+            {
+                "clusters": [{"id": "c1", "name": "Racine", "color": "teal"}],
+                "nodes": [
+                    {"id": "c1", "name": "Racine", "color": "teal"},
+                    {"id": "c1-1", "name": "Sous-groupe", "color": "teal"},
+                ],
+                "assignments": {"t1": "c1-1"},
+                "paths": {"t1": ["c1", "c1-1"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(server, "LIB_JSON", library)
+    monkeypatch.setattr(server, "CLUSTERS_JSON", clusters)
+    monkeypatch.setattr(server, "DB", tmp_path / "missing.sqlite")
+
+    track = server.merged_library()["tracks"][0]
+
+    assert track["cluster"] == "c1-1"
+    assert track["cluster_name"] == "Sous-groupe"
+    assert track["cluster_path"] == ["c1", "c1-1"]
+    assert track["cluster_path_names"] == ["Racine", "Sous-groupe"]

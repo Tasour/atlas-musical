@@ -33,11 +33,13 @@ La carte est une lecture opérationnelle du circumplex de Russell (1980), enrich
 
 ## Clusters de similarité
 
-Une seconde lecture, indépendante de la carte affective, regroupe les pistes qui se ressemblent. L’espace combine les 16 scores de tags, les trois axes affectifs et quatre descripteurs (énergie, BPM, acousticité, danceabilité), standardisés puis pondérés. Une classification ascendante hiérarchique de Ward est coupée entre 3 et 9 groupes ; le nombre retenu maximise la silhouette, avec au moins trois pistes par groupe.
+Les groupes sont calculés sur un espace **audio + affect** : 24 descripteurs acoustiques et valence/arousal/tension, standardisés robustement (médiane/MAD, winsorisation), équilibrés par bloc, puis réduits par ACP (six composantes). Les tags ne servent **pas** au clustering : ils servent au nommage et à la lecture.
 
-Chaque groupe est nommé par ses tags les plus surreprésentés par rapport au corpus. Un tag très spécifique (fort lift ou score moyen élevé) sert directement de nom ; sinon le nom combine les deux tags dominants. La description ajoute la famille majoritaire et les moyennes affectives. Les groupes sont projetés en 2D par ACP, puis un layout de répulsion limite les chevauchements. La taille de la bulle représente l’effectif, le halo la dispersion des pistes.
+Une classification ascendante hiérarchique de Ward construit un seul dendrogramme, coupé en 4 à 6 groupes racines (silhouette, taille minimale), puis découpé récursivement en sous-groupes jusqu’à trois niveaux. Les enfants sont toujours des sous-ensembles exacts du parent : le zoom ne recalcule pas une partition concurrente.
 
-Ces groupes sont **descriptifs** : ils résument des proximités dans l’espace de features, pas des genres musicaux validés. Les noms et les frontières doivent être vérifiés à l’écoute, et le nombre de groupes peut être imposé avec `analysis.cluster --clusters`.
+La stabilité est estimée par bootstrap : 100 rééchantillonnages à 80 % pour les racines, 60 locaux pour les sous-groupes, avec Jaccard par nœud et ARI global. `data/clusters.json` expose `roots`, `nodes`, `paths`, `assignments`, `stability`, `silhouette` et la variance expliquée de l’ACP.
+
+Chaque nœud est nommé par ses tags les plus surreprésentés, avec une prévalence minimale et un lift positif. Les noms restent descriptifs : ils résument des proximités dans l’espace de features, pas des genres musicaux validés. Ils doivent être vérifiés à l’écoute.
 
 ## Descripteurs
 
