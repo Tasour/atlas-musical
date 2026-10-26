@@ -1,69 +1,69 @@
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
-const FAMILY_LABELS = {
-  acoustique: "Acoustique / folk",
-  cinematique: "Cinématique / ambient",
-  tropical: "Tropical / chill",
-  intense: "Intense / aventure",
+const STORAGE = {
+  brief: "atlas:brief:v2",
+  shortlist: "atlas:shortlist:v2",
+  favorites: "atlas:favorites",
+  volume: "atlas:volume",
 };
 
-const FAMILY_SHORT = {
-  acoustique: "Acoustique",
-  cinematique: "Cinématique",
-  tropical: "Tropical",
-  intense: "Intense",
+const STATUS = {
+  "a-ecouter": "À écouter",
+  retenu: "Retenu",
+  ecarte: "Écarté",
+  choisi: "Choisi",
 };
 
-const SORT_LABELS = {
-  relevance: "pertinence",
-  energy: "énergie",
-  valence: "valence",
-  tension: "tension",
-  bpm: "BPM",
-  duration: "durée",
-  title: "titre",
-  cluster: "cluster",
-};
+const STATUS_ORDER = ["a-ecouter", "retenu", "ecarte", "choisi"];
 
-const MAP = { width: 900, height: 620, pad: 58 };
+const TONES = {
+  lumineux: { label: "Lumineux", valence: 0.55, arousal: 0.1 },
+  sombre: { label: "Sombre", valence: -0.55, arousal: 0.1 },
+  calme: { label: "Calme", valence: 0.1, arousal: -0.55 },
+  energique: { label: "Énergique", valence: 0.15, arousal: 0.6 },
+  intime: { label: "Intime", valence: 0.3, arousal: -0.35 },
+  epique: { label: "Épique", valence: 0, arousal: 0.65 },
+};
 
 const state = {
   library: null,
   tracks: [],
   tags: [],
-  families: [],
+  tagMap: new Map(),
+  usages: [],
   clusters: null,
-  clusterById: new Map(),
-  view: "affect",
-  favorites: new Set(),
-  selectedId: null,
-  currentId: null,
-  loop: false,
-  pendingPlay: false,
-  pendingSeek: null,
-  previewStop: null,
-  preset: "Tout",
-  sort: "relevance",
-  mapPositions: new Map(),
-  filters: {
-    q: "",
-    families: new Set(),
-    tags: new Set(),
-    clusters: new Set(),
-    bpmMin: 0,
-    bpmMax: 240,
-    durMin: 0,
-    durMax: 20,
-    confMin: 0,
-    favoritesOnly: false,
-  },
+  nodes: new Map(),
+  roots: [],
+  trackById: new Map(),
+  route: { name: "groups" },
+  brief: readJSON(STORAGE.brief, null),
+  shortlist: new Map(),
+  compare: [],
+  search: "",
+  groupFilters: { tag: "", duration: "all" },
+  lastGroupId: null,
+  player: { currentId: null, preview: false, loop: false },
 };
 
 const audio = $("#audio");
-const tooltip = $("#mapTooltip");
-const mapWrap = $("#mapWrap");
-const svg = $("#emotionMap");
+
+function readJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* stockage indisponible */
+  }
+}
 
 function esc(value) {
   return String(value ?? "")
@@ -83,13 +83,12 @@ function clamp01(value) {
 }
 
 function fmtTime(seconds) {
-  const s = Math.max(0, Math.round(Number(seconds) || 0));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const value = Math.max(0, Math.round(Number(seconds) || 0));
+  return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
 }
 
 function fmtDur(seconds) {
-  const s = Math.round(Number(seconds) || 0);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return fmtTime(seconds);
 }
 
 function fmtPct(value, digits = 0) {
@@ -101,41 +100,19 @@ function fmtSigned(value) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}`;
 }
 
-function tensionColor(t) {
-  const hue = 190 - 190 * clamp01(t);
-  return `hsl(${hue.toFixed(1)} 46% 58%)`;
-}
-
-function tagMeta(name) {
-  return state.tags.find((t) => t.name === name) || { color: "var(--accent)", category: "autre" };
-}
-
-function clustersAvailable() {
-  return Boolean(state.clusters && Array.isArray(state.clusters.clusters) && state.clusters.clusters.length);
-}
-
-function clusterFor(track) {
-  return track && track.cluster ? state.clusterById.get(track.cluster) || null : null;
-}
-
-function clusterBadge(track, extra = "") {
-  const cluster = clusterFor(track);
-  if (!cluster) return "";
-  return `<span class="cluster-badge${extra ? ` ${extra}` : ""}" style="--cluster:${cluster.color}" title="${esc(cluster.description || "")}"><i></i>${esc(cluster.name)}</span>`;
-}
-
-function clusterLabelLines(name) {
-  const parts = String(name || "").split(/\s*&\s*|\s*·\s*/).filter(Boolean);
-  if (parts.length >= 2) return [parts[0], `& ${parts[1]}`];
-  return [String(name || "")];
+function norm(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }
 
 function effective(track) {
-  const a = track.annotation || {};
-  const has = (key) => a[key] !== null && a[key] !== undefined;
-  const valence = has("valence") ? Number(a.valence) : Number(track.valence);
-  const arousal = has("arousal") ? Number(a.arousal) : Number(track.arousal);
-  const tension = has("tension") ? Number(a.tension) : Number(track.tension);
+  const annotation = track.annotation || {};
+  const has = (key) => annotation[key] !== null && annotation[key] !== undefined;
+  const valence = has("valence") ? Number(annotation.valence) : Number(track.valence || 0);
+  const arousal = has("arousal") ? Number(annotation.arousal) : Number(track.arousal || 0);
+  const tension = has("tension") ? Number(annotation.tension) : Number(track.tension || 0);
   return {
     valence,
     arousal,
@@ -148,900 +125,1414 @@ function effective(track) {
 }
 
 function trackTags(track) {
-  return Array.from(new Set([...(track.tags || []), ...((track.annotation && track.annotation.tags) || [])]));
+  return Array.from(
+    new Set([...(track.tags || []), ...((track.annotation && track.annotation.tags) || [])])
+  );
 }
 
-function tagColorStyle(name) {
-  return `--tag:${tagMeta(name).color}`;
+function visibleTags(track) {
+  return trackTags(track).filter((tag) => tag !== "Instrumental");
 }
 
-function tagChip(name, compact = false) {
-  return `<span class="chip${compact ? " compact" : ""}" style="${tagColorStyle(name)}"><i class="dot"></i>${esc(name)}</span>`;
+function tagColor(name) {
+  return state.tagMap.get(name)?.color || "var(--accent)";
 }
 
-function trackMatches(track) {
-  const f = state.filters;
-  const eff = effective(track);
-  const tags = trackTags(track);
-  if (f.q) {
-    const hay = [track.title, track.artist, track.genre, track.family, track.key, ...tags]
-      .join(" ")
-      .toLowerCase();
-    if (!hay.includes(f.q)) return false;
-  }
-  if (f.families.size && !f.families.has(track.family)) return false;
-  if (f.clusters.size && !f.clusters.has(track.cluster)) return false;
-  for (const tag of f.tags) {
-    if (!tags.includes(tag)) return false;
-  }
-  const bpm = Number(track.bpm) || 0;
-  if (bpm < f.bpmMin || bpm > f.bpmMax) return false;
-  const minutes = (Number(track.duration) || 0) / 60;
-  if (minutes < f.durMin || minutes > f.durMax) return false;
-  if ((Number(track.confidence) || 0) * 100 < f.confMin) return false;
-  if (f.favoritesOnly && !state.favorites.has(track.id)) return false;
-  if (state.preset !== "Tout") {
-    const score = Number(track.usage_scores?.[state.preset] || 0);
-    if (score < 0.65) return false;
-  }
-  return true;
+function clusterOf(track) {
+  return state.nodes.get(track.cluster) || null;
 }
 
-function relevance(track) {
-  if (state.preset !== "Tout") return Number(track.usage_scores?.[state.preset] || 0);
-  const eff = effective(track);
-  return 0.40 * (Number(track.confidence) || 0) + 0.32 * eff.valence01 + 0.28 * eff.arousal01;
+function rootOf(node) {
+  let current = node;
+  while (current && current.parent) current = state.nodes.get(current.parent);
+  return current;
 }
 
-function filteredTracks() {
-  const list = state.tracks.filter(trackMatches);
-  const sort = state.sort;
-  list.sort((a, b) => {
-    if (sort === "title") return a.title.localeCompare(b.title, "fr");
-    if (sort === "cluster") {
-      const left = clusterFor(a)?.name || "";
-      const right = clusterFor(b)?.name || "";
-      return left.localeCompare(right, "fr") || relevance(b) - relevance(a);
+function clusterPath(track) {
+  const names = track.cluster_path_names || [];
+  if (names.length) return names;
+  const namesFromIds = (track.cluster_path || []).map(
+    (id) => state.nodes.get(id)?.name || id
+  );
+  return namesFromIds;
+}
+
+function clustersAvailable() {
+  return state.roots.length > 0;
+}
+
+function shortlistEntry(id) {
+  return state.shortlist.get(id) || null;
+}
+
+function loadShortlist() {
+  const raw = readJSON(STORAGE.shortlist, null);
+  const entries = new Map();
+  if (Array.isArray(raw)) {
+    raw.forEach((item, index) => {
+      if (!item || !item.id) return;
+      entries.set(item.id, {
+        id: item.id,
+        status: STATUS[item.status] ? item.status : "a-ecouter",
+        note: String(item.note || ""),
+        order: Number.isFinite(item.order) ? item.order : index,
+      });
+    });
+  } else {
+    const favorites = readJSON(STORAGE.favorites, []);
+    if (Array.isArray(favorites)) {
+      favorites.forEach((id, index) => {
+        if (typeof id === "string") {
+          entries.set(id, { id, status: "a-ecouter", note: "", order: index });
+        }
+      });
     }
-    if (sort === "bpm") return (Number(a.bpm) || 0) - (Number(b.bpm) || 0);
-    if (sort === "duration") return (Number(a.duration) || 0) - (Number(b.duration) || 0);
-    if (sort === "energy") return (Number(b.energy) || 0) - (Number(a.energy) || 0);
-    if (sort === "valence") return effective(b).valence01 - effective(a).valence01;
-    if (sort === "tension") return effective(b).tension01 - effective(a).tension01;
-    return relevance(b) - relevance(a);
+  }
+  return entries;
+}
+
+function saveShortlist() {
+  const items = [...state.shortlist.values()].sort((a, b) => a.order - b.order);
+  writeJSON(STORAGE.shortlist, items);
+  updateShortlistCount();
+}
+
+function updateShortlistCount() {
+  const count = String(state.shortlist.size);
+  $("#shortlistCount").textContent = count;
+  const inline = $("#shortlistInline");
+  if (inline) inline.textContent = count;
+}
+
+function nextOrder() {
+  return state.shortlist.size ? Math.max(...[...state.shortlist.values()].map((e) => e.order)) + 1 : 0;
+}
+
+function updateAddButtons(id) {
+  const entry = shortlistEntry(id);
+  $$(`[data-add="${CSS.escape(id)}"]`).forEach((button) => {
+    button.classList.toggle("active", Boolean(entry));
+    button.innerHTML = `${icon("plus")} ${entry ? STATUS[entry.status] : "+ Short-list"}`;
   });
+  updateShortlistCount();
+}
+
+function addToShortlist(id, status = "a-ecouter") {
+  if (!state.trackById.has(id)) return;
+  const existing = state.shortlist.get(id);
+  if (existing) {
+    if (existing.status !== status) {
+      existing.status = status;
+      saveShortlist();
+    }
+    showToast(`Déjà dans la short-list · ${STATUS[existing.status]}`);
+    return;
+  }
+  state.shortlist.set(id, { id, status, note: "", order: nextOrder() });
+  saveShortlist();
+  showToast(`Ajouté à la short-list · ${STATUS[status]}`);
+}
+
+function removeFromShortlist(id) {
+  if (!state.shortlist.delete(id)) return;
+  state.compare = state.compare.filter((item) => item !== id);
+  saveShortlist();
+  showToast("Retiré de la short-list.");
+}
+
+function setShortlistStatus(id, status) {
+  const entry = state.shortlist.get(id);
+  if (!entry) return;
+  if (status === "choisi") {
+    chooseTrack(id, { silent: true });
+    return;
+  }
+  entry.status = STATUS[status] ? status : "a-ecouter";
+  saveShortlist();
+}
+
+function chooseTrack(id, { silent = false } = {}) {
+  for (const entry of state.shortlist.values()) {
+    if (entry.id === id) entry.status = "choisi";
+    else if (entry.status === "choisi") entry.status = "retenu";
+  }
+  if (!state.shortlist.has(id)) {
+    state.shortlist.set(id, { id, status: "choisi", note: "", order: nextOrder() });
+  }
+  saveShortlist();
+  if (!silent) showToast("Piste choisie. Le crédit est prêt dans la fiche.");
+}
+
+function briefSummary() {
+  if (!state.brief) return "Aucun brief";
+  const tone = TONES[state.brief.tone]?.label || state.brief.tone;
+  const parts = [state.brief.type, `${state.brief.duration} s`, tone];
+  if (state.brief.loop) parts.push("boucle");
+  if (state.brief.dialogue) parts.push("dialogue");
+  return parts.join(" · ");
+}
+
+function briefScore(track) {
+  if (!state.brief) return null;
+  const effect = effective(track);
+  const tone = TONES[state.brief.tone] || TONES.calme;
+  const usage = Number(track.usage_scores?.[state.brief.type] || 0);
+  const valenceMatch = 1 - Math.abs(effect.valence - tone.valence) / 2;
+  const arousalMatch = 1 - Math.abs(effect.arousal - tone.arousal) / 2;
+  const target = Math.max(10, Number(state.brief.duration) || 30);
+  const durationFit = 1 - Math.min(1, Math.abs(Number(track.duration || 0) - target) / target);
+  const loopFit = state.brief.loop ? clamp01(track.loopability) : 0.5;
+  const score =
+    0.35 * usage +
+    0.25 * valenceMatch +
+    0.2 * arousalMatch +
+    0.1 * durationFit +
+    0.1 * loopFit;
+  return clamp01(score);
+}
+
+function briefReasons(track) {
+  if (!state.brief) return [];
+  const effect = effective(track);
+  const tone = TONES[state.brief.tone] || TONES.calme;
+  const usage = Number(track.usage_scores?.[state.brief.type] || 0);
+  const target = Math.max(10, Number(state.brief.duration) || 30);
+  const durationFit = 1 - Math.min(1, Math.abs(Number(track.duration || 0) - target) / target);
+  const reasons = [];
+  if (usage > 0.6) reasons.push(`usage ${state.brief.type} ${usage.toFixed(2)}`);
+  if (Math.abs(effect.valence - tone.valence) < 0.35) reasons.push(`ton ${tone.label.toLowerCase()}`);
+  if (state.brief.loop && Number(track.loopability) > 0.55) reasons.push("boucle propre");
+  if (durationFit > 0.7) reasons.push("durée proche du plan");
+  return reasons.slice(0, 3);
+}
+
+function groupScore(node) {
+  if (!state.brief) return null;
+  const scores = (node.track_ids || []).map((id) => {
+    const track = state.trackById.get(id);
+    return track ? briefScore(track) : null;
+  }).filter((value) => value !== null);
+  if (!scores.length) return null;
+  return scores.reduce((sum, value) => sum + value, 0) / scores.length;
+}
+
+function sortedTracks(tracks) {
+  const list = [...tracks];
+  if (state.brief) {
+    list.sort((a, b) => briefScore(b) - briefScore(a));
+  } else {
+    list.sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0));
+  }
   return list;
 }
 
-function selectedTrack() {
-  return state.tracks.find((t) => t.id === state.selectedId) || null;
-}
-
-function currentTrack() {
-  return state.tracks.find((t) => t.id === state.currentId) || null;
-}
-
-function renderFilters() {
-  const familyHost = $("#familyFilters");
-  familyHost.innerHTML = state.families
-    .map((family) => {
-      const count = state.tracks.filter((t) => t.family === family).length;
-      const active = state.filters.families.has(family);
-      return `<button class="chip${active ? " active" : ""}" type="button" data-family="${esc(family)}" aria-pressed="${active}">${esc(FAMILY_SHORT[family] || family)} <span class="count">${count}</span></button>`;
+function searchTracks(query) {
+  const needle = norm(query);
+  if (!needle) return [];
+  return state.tracks
+    .filter((track) => {
+      const hay = [
+        track.title,
+        track.artist,
+        track.genre,
+        ...trackTags(track),
+        ...clusterPath(track),
+      ].join(" ");
+      return norm(hay).includes(needle);
     })
-    .join("");
+    .sort((a, b) => {
+      if (state.brief) return briefScore(b) - briefScore(a);
+      return Number(b.confidence || 0) - Number(a.confidence || 0);
+    })
+    .slice(0, 40);
+}
 
-  const clusterSection = $("#clusterSection");
-  if (clustersAvailable()) {
-    clusterSection.hidden = false;
-    $("#clusterFilters").innerHTML = [...state.clusters.clusters]
-      .sort((a, b) => b.size - a.size)
-      .map((cluster) => {
-        const active = state.filters.clusters.has(cluster.id);
-        return `<button class="chip cluster-chip${active ? " active" : ""}" type="button" data-cluster-filter="${esc(cluster.id)}" aria-pressed="${active}" style="--tag:${cluster.color}" title="${esc(cluster.description || "")}"><i class="dot"></i>${esc(cluster.name)} <span class="count">${cluster.size}</span></button>`;
-      })
-      .join("");
+function navigate(path) {
+  const target = path.startsWith("#") ? path : `#/${path}`;
+  if (window.location.hash === target) {
+    renderRoute(true);
   } else {
-    clusterSection.hidden = true;
-    $("#clusterFilters").innerHTML = "";
+    window.location.hash = target;
   }
-
-  const tagHost = $("#tagFilters");
-  const categories = [
-    ["émotion", "Émotions"],
-    ["texture", "Texture"],
-    ["contexte", "Contexte"],
-  ];
-  tagHost.innerHTML = categories
-    .map(([category, label]) => {
-      const tags = state.tags.filter((t) => t.category === category);
-      if (!tags.length) return "";
-      return `<div class="tag-group"><div class="tag-group-title">${label}</div><div class="chips">${tags
-        .map((tag) => {
-          const active = state.filters.tags.has(tag.name);
-          const count = state.tracks.filter((t) => trackTags(t).includes(tag.name)).length;
-          return `<button class="chip${active ? " active" : ""}" type="button" data-tag="${esc(tag.name)}" aria-pressed="${active}" style="--tag:${tag.color}" title="${esc(tag.description || "")}"><i class="dot"></i>${esc(tag.name)} <span class="count">${count}</span></button>`;
-        })
-        .join("")}</div></div>`;
-    })
-    .join("");
-
-  $("#bpmMin").value = state.filters.bpmMin;
-  $("#bpmMax").value = state.filters.bpmMax;
-  $("#durMin").value = state.filters.durMin;
-  $("#durMax").value = state.filters.durMax;
-  $("#confMin").value = state.filters.confMin;
-  $("#confOut").value = `${state.filters.confMin} %`;
-  $("#favoritesOnly").checked = state.filters.favoritesOnly;
-  const filtered = filteredTracks().length;
-  $("#filterHint").textContent = `${state.tracks.length} pistes`;
-  $("#filterSummary").textContent = `${filtered} / ${state.tracks.length} pistes`;
 }
 
-function renderPresets() {
-  $$("#presets .chip").forEach((button) => {
-    const active = button.dataset.preset === state.preset;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", active);
-  });
-  const caption = state.preset === "Tout" ? "Toutes les pistes" : `Preset : ${state.preset} — score d’usage ≥ 0.65`;
-  $("#presetCaption").textContent = caption;
-}
-
-function buildMapBase() {
-  const { width, height, pad } = MAP;
-  const innerW = width - pad * 2;
-  const innerH = height - pad * 2;
-  const fills = [
-    ["rgba(95,168,184,.035)", 0, 0],
-    ["rgba(201,194,180,.035)", 0, 1],
-    ["rgba(109,143,184,.035)", 1, 0],
-    ["rgba(196,90,90,.035)", 1, 1],
-  ];
-  const quadrants = $("#mapQuadrants");
-  quadrants.innerHTML = fills
-    .map(([fill, col, row]) => {
-      const x = pad + col * innerW / 2;
-      const y = pad + row * innerH / 2;
-      return `<rect x="${x}" y="${y}" width="${innerW / 2}" height="${innerH / 2}" fill="${fill}"/>`;
-    })
-    .join("");
-
-  const grid = $("#mapGrid");
-  const lines = [];
-  [0.0, 0.25, 0.5, 0.75, 1.0].forEach((v) => {
-    const x = pad + v * innerW;
-    const y = height - pad - v * innerH;
-    const mid = v === 0.5 ? " class=\"mid\"" : "";
-    lines.push(`<line${mid} x1="${x}" y1="${pad}" x2="${x}" y2="${height - pad}"/>`);
-    lines.push(`<line${mid} x1="${pad}" y1="${y}" x2="${width - pad}" y2="${y}"/>`);
-  });
-  grid.innerHTML = lines.join("");
-}
-
-function renderMap() {
-  const { width, height, pad } = MAP;
-  const innerW = width - pad * 2;
-  const innerH = height - pad * 2;
-  const filteredIds = new Set(filteredTracks().map((t) => t.id));
-  state.mapPositions.clear();
-
-  const points = state.tracks.map((track) => {
-    const eff = effective(track);
-    const x = pad + eff.arousal01 * innerW;
-    const y = height - pad - eff.valence01 * innerH;
-    state.mapPositions.set(track.id, { x, y, track });
-    const color = tensionColor(eff.tension01);
-    const selected = track.id === state.selectedId;
-    const dimmed = !filteredIds.has(track.id);
-    const favorite = state.favorites.has(track.id);
-    const r = 6 + 7 * clamp01(track.confidence);
-    const rx = 14 + 120 * Number(track.ellipse_rx || 0.06);
-    const ry = 14 + 150 * Number(track.ellipse_ry || 0.06);
-    return `<g class="point${selected ? " selected" : ""}${dimmed ? " dimmed" : ""}${favorite ? " favorite" : ""}" data-id="${esc(track.id)}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="${esc(track.title)} — ${esc(track.artist)}" style="--pt-color:${color}" transform="translate(${x.toFixed(2)} ${y.toFixed(2)})">
-      <ellipse class="halo" cx="0" cy="0" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"></ellipse>
-      <circle class="ring" cx="0" cy="0" r="${(r + 7).toFixed(1)}"></circle>
-      <circle class="core" cx="0" cy="0" r="${r.toFixed(1)}"></circle>
-      <text class="label" x="0" y="${(-r - 11).toFixed(1)}" text-anchor="middle">${esc(track.title)}</text>
-      <circle class="hit" cx="0" cy="0" r="${Math.max(18, r + 10)}"></circle>
-    </g>`;
-  });
-  $("#mapPoints").innerHTML = points.join("");
-  $$("#mapPoints .point").forEach((node) => {
-    const track = state.tracks.find((t) => t.id === node.dataset.id);
-    if (!track) return;
-    node.addEventListener("click", (event) => {
-      event.stopPropagation();
-      selectTrack(track.id, { play: true });
-    });
-    node.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        selectTrack(track.id, { play: true });
-      }
-    });
-    node.addEventListener("mouseenter", (event) => showTooltip(track, event));
-    node.addEventListener("mousemove", (event) => moveTooltip(event));
-    node.addEventListener("mouseleave", hideTooltip);
-    node.addEventListener("focus", () => showTooltipAtPoint(track, node));
-    node.addEventListener("blur", hideTooltip);
-  });
-}
-
-function showTooltip(track, event) {
-  const eff = effective(track);
-  tooltip.innerHTML = `<strong>${esc(track.title)}</strong>
-    <div class="t-artist">${esc(track.artist)}</div>
-    <div class="t-tags">${trackTags(track).slice(0, 3).map((tag) => `<span class="t-tag" style="${tagColorStyle(tag)}">${esc(tag)}</span>`).join("")}</div>
-    <div class="t-row"><span>${Math.round((Number(track.bpm) || 0))} BPM · ${esc(track.key || "—")}</span><b>${fmtDur(track.duration)}</b></div>
-    <div class="t-row"><span>valence ${fmtSigned(eff.valence)} · tension ${fmtSigned(eff.tension)}</span><b>${fmtPct(track.confidence)} conf.</b></div>`;
-  tooltip.hidden = false;
-  moveTooltip(event);
-}
-
-function showTooltipAtPoint(track, node) {
-  const rect = node.getBoundingClientRect();
-  showTooltip(track, { clientX: rect.left + rect.width / 2, clientY: rect.top });
-}
-
-function moveTooltip(event) {
-  const wrap = mapWrap.getBoundingClientRect();
-  const x = event.clientX - wrap.left;
-  const y = event.clientY - wrap.top;
-  const tw = tooltip.offsetWidth || 230;
-  const th = tooltip.offsetHeight || 100;
-  const left = x + 14 + tw > wrap.width ? x - tw - 14 : x + 14;
-  const top = Math.max(8, Math.min(wrap.height - th - 8, y - th / 2));
-  tooltip.style.left = `${Math.max(8, left)}px`;
-  tooltip.style.top = `${top}px`;
-  tooltip.style.transform = "none";
-}
-
-function hideTooltip() {
-  tooltip.hidden = true;
-}
-
-const CLUSTER_PAD = 72;
-
-function renderClusterMap() {
-  const host = $("#clusterBubbles");
-  if (!clustersAvailable()) {
-    host.innerHTML = "";
-    $("#clusterReadout").textContent = "Clusters indisponibles : relancer l’analyse.";
-    return;
+function parseRoute() {
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const parts = raw.split("/").filter(Boolean);
+  if (!parts.length) return { name: "groups" };
+  if (parts[0] === "brief") return { name: "brief" };
+  if (parts[0] === "shortlist") return { name: "shortlist" };
+  if (parts[0] === "group" && parts[1]) {
+    return { name: "group", groupId: decodeURIComponent(parts.slice(1).join("/")) };
   }
-  const { width, height } = MAP;
-  const innerW = width - CLUSTER_PAD * 2;
-  const innerH = height - CLUSTER_PAD * 2;
-  const scale = Math.min(innerW, innerH);
-  const active = state.filters.clusters;
-  const hasActive = active.size > 0;
-
-  host.innerHTML = state.clusters.clusters
-    .map((cluster) => {
-      const cx = CLUSTER_PAD + cluster.x * innerW;
-      const cy = height - CLUSTER_PAD - cluster.y * innerH;
-      const radius = Math.max(28, Number(cluster.r || 0.06) * scale);
-      const halo = Math.max(8, Number(cluster.spread || 0.04) * scale * 0.65);
-      const isActive = active.has(cluster.id);
-      const dimmed = hasActive && !isActive;
-      const lines = clusterLabelLines(cluster.name);
-      const font = Math.max(11, Math.min(15, radius / 5.2));
-      const label = lines
-        .map((line, index) => `<tspan x="${cx.toFixed(1)}" y="${(cy - (lines.length > 1 ? 9 : 3) + index * (font + 2)).toFixed(1)}">${esc(line)}</tspan>`)
-        .join("");
-      const countY = cy + (lines.length > 1 ? font + 12 : 14);
-      return `<g class="cluster-bubble${isActive ? " active" : ""}${dimmed ? " dimmed" : ""}" data-cluster="${esc(cluster.id)}" tabindex="0" role="button" aria-pressed="${isActive}" aria-label="${esc(cluster.name)} — ${cluster.size} pistes" style="--cluster:${cluster.color}">
-        <circle class="bubble-halo" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(radius + halo).toFixed(1)}"></circle>
-        <circle class="bubble" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${radius.toFixed(1)}"></circle>
-        <text class="bubble-name" style="font-size:${font.toFixed(1)}px" text-anchor="middle">${label}</text>
-        <text class="bubble-count" x="${cx.toFixed(1)}" y="${countY.toFixed(1)}" text-anchor="middle">${cluster.size} pistes</text>
-      </g>`;
-    })
-    .join("");
-
-  $$("#clusterBubbles .cluster-bubble").forEach((node) => {
-    const cluster = state.clusterById.get(node.dataset.cluster);
-    if (!cluster) return;
-    node.addEventListener("click", (event) => {
-      event.stopPropagation();
-      toggleClusterFilter(cluster.id);
-    });
-    node.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        toggleClusterFilter(cluster.id);
-      }
-    });
-    node.addEventListener("mouseenter", (event) => showClusterTooltip(cluster, event));
-    node.addEventListener("mousemove", (event) => moveClusterTooltip(event));
-    node.addEventListener("mouseleave", hideClusterTooltip);
-    node.addEventListener("focus", () => {
-      const rect = node.getBoundingClientRect();
-      showClusterTooltip(cluster, { clientX: rect.left + rect.width / 2, clientY: rect.top });
-    });
-    node.addEventListener("blur", hideClusterTooltip);
-  });
-}
-
-function clusterHash() {
-  if (state.view !== "clusters") return "";
-  const ids = [...state.filters.clusters];
-  return ids.length === 1 ? `#clusters=${ids[0]}` : "#clusters";
-}
-
-function updateHash() {
-  const hash = clusterHash();
-  const target = hash || window.location.pathname + window.location.search;
-  if (window.location.hash !== hash) window.history.replaceState(null, "", target);
-}
-
-function toggleClusterFilter(clusterId) {
-  if (!clusterId) return;
-  if (state.filters.clusters.has(clusterId)) state.filters.clusters.delete(clusterId);
-  else state.filters.clusters.add(clusterId);
-  updateHash();
-  renderFilters();
-  renderClusterMap();
-  renderList();
-}
-
-function showClusterTooltip(cluster, event) {
-  const tip = $("#clusterTooltip");
-  tip.innerHTML = `<strong>${esc(cluster.name)}</strong>
-    <div class="t-artist">${esc(cluster.description || "")}</div>
-    <div class="t-tags">${(cluster.top_tags || []).slice(0, 4).map((tag) => `<span class="t-tag" style="--tag:${cluster.color}">${esc(tag.name)}</span>`).join("")}</div>`;
-  tip.hidden = false;
-  $("#clusterReadout").textContent = `${cluster.name} · ${cluster.size} pistes · cliquer pour filtrer`;
-  moveClusterTooltip(event);
-}
-
-function moveClusterTooltip(event) {
-  const wrap = $("#clusterWrap").getBoundingClientRect();
-  const tip = $("#clusterTooltip");
-  const x = event.clientX - wrap.left;
-  const y = event.clientY - wrap.top;
-  const tw = tip.offsetWidth || 240;
-  const th = tip.offsetHeight || 100;
-  const left = x + 14 + tw > wrap.width ? x - tw - 14 : x + 14;
-  const top = Math.max(8, Math.min(wrap.height - th - 8, y - th / 2));
-  tip.style.left = `${Math.max(8, left)}px`;
-  tip.style.top = `${top}px`;
-}
-
-function hideClusterTooltip() {
-  $("#clusterTooltip").hidden = true;
-  $("#clusterReadout").textContent = "Chaque bulle regroupe les pistes qui se ressemblent.";
-}
-
-function setView(view) {
-  if (view === "clusters" && !clustersAvailable()) return;
-  state.view = view;
-  const affect = view === "affect";
-  $("#mapWrap").hidden = !affect;
-  $("#clusterWrap").hidden = affect;
-  $$("#viewTabs .view-tab").forEach((button) => {
-    const active = button.dataset.view === view;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-  });
-  $("#mapTitle").textContent = affect ? "Carte émotionnelle" : "Clusters de similarité";
-  $("#mapSubtitle").textContent = affect
-    ? "Cliquer une piste pour l’écouter au hook · couleur = tension · taille = confiance"
-    : "Chaque bulle regroupe des pistes similaires · taille = effectif · cliquer pour filtrer";
-  updateHash();
-  if (affect) renderMap();
-  else renderClusterMap();
-}
-
-function renderList() {
-  const list = filteredTracks();
-  $("#resultCount").textContent = list.length;
-  $("#listCaption").textContent = `Tri par ${SORT_LABELS[state.sort] || state.sort}${state.preset !== "Tout" ? ` · preset ${state.preset}` : ""}`;
-  const host = $("#trackList");
-  if (!list.length) {
-    host.innerHTML = `<div class="track-empty">Aucune piste ne correspond. Élargissez les filtres ou choisissez « Tout ».</div>`;
-    return;
+  if (parts[0] === "track" && parts[1]) {
+    return { name: "track", trackId: decodeURIComponent(parts.slice(1).join("/")) };
   }
-  host.innerHTML = list
-    .map((track) => {
-      const eff = effective(track);
-      const selected = track.id === state.selectedId;
-      const favorite = state.favorites.has(track.id);
-      const tags = trackTags(track);
-      return `<div class="track-row${selected ? " selected" : ""}" role="listitem" tabindex="0" data-id="${esc(track.id)}" aria-label="${esc(track.title)} par ${esc(track.artist)}">
-        <button class="track-play" type="button" data-play="${esc(track.id)}" aria-label="Écouter ${esc(track.title)}">${icon("play")}</button>
-        <div class="track-main">
-          <div class="track-title">${esc(track.title)} ${eff.manual ? '<span class="track-manual">manuel</span>' : ""}</div>
-          <div class="track-artist">${esc(track.artist)} · ${esc(FAMILY_SHORT[track.family] || track.family)} ${clusterBadge(track)}</div>
-          <div class="track-tags">${tags.slice(0, 4).map((tag) => `<span style="${tagColorStyle(tag)}">${esc(tag)}</span>`).join("")}</div>
-        </div>
-        <div class="track-side">
-          <div class="track-side-actions">
-            <button class="track-download" type="button" data-download="${esc(track.id)}" aria-label="Télécharger ${esc(track.title)}" title="Télécharger le MP3">${icon("download")}</button>
-            <button class="track-fav" type="button" data-fav="${esc(track.id)}" aria-label="Favori" aria-pressed="${favorite}">${icon("star")}</button>
-          </div>
-          <span class="track-bpm">${Math.round(Number(track.bpm) || 0)} BPM</span>
-        </div>
-      </div>`;
-    })
-    .join("");
+  return { name: "groups" };
 }
 
-function keyWheel(track) {
-  const chroma = track.features?.chroma_mean || [];
-  const root = Number(track.features?.key_root ?? 0);
-  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-  const cx = 43;
-  const cy = 43;
-  const base = 34;
-  const parts = [];
-  for (let i = 0; i < 12; i++) {
-    const angle = (-90 + i * 30) * (Math.PI / 180);
-    const value = Number(chroma[i] || 0);
-    const radius = 22 + 16 * clamp01(value / 0.22);
-    const x1 = cx + Math.cos(angle) * 19;
-    const y1 = cy + Math.sin(angle) * 19;
-    const x2 = cx + Math.cos(angle) * radius;
-    const y2 = cy + Math.sin(angle) * radius;
-    const isRoot = i === root;
-    const x = cx + Math.cos(angle) * base;
-    const y = cy + Math.sin(angle) * base;
-    parts.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`);
-    parts.push(`<circle class="${isRoot ? "root" : "note"}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isRoot ? 3.8 : 2.2}"/>`);
-    if (isRoot) {
-      parts.push(`<text x="${x.toFixed(1)}" y="${(y + 2.8).toFixed(1)}" text-anchor="middle" fill="var(--bg)" font-size="4.2" font-family="monospace">${names[i]}</text>`);
+function renderRoute(focus = false) {
+  state.route = parseRoute();
+  updateFlowNav();
+  renderView();
+  if (focus) {
+    window.scrollTo(0, 0);
+    const heading = $("#view h1");
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
     }
   }
-  return `<svg class="key-wheel" viewBox="0 0 86 86" aria-hidden="true"><circle class="outer" cx="${cx}" cy="${cy}" r="39"/>${parts.join("")}</svg>`;
+  const titles = {
+    brief: "Brief du plan",
+    groups: "Explorer",
+    group: "Affiner",
+    shortlist: "Short-list",
+    track: "Décider",
+  };
+  document.title = `${titles[state.route.name] || "Atlas Musical"} — Atlas Musical`;
 }
 
-function arcBars(track) {
-  const arc = Array.isArray(track.arc) && track.arc.length ? track.arc : Array(12).fill(0.4);
-  const peak = Number(track.features?.arc_peak_index ?? -1);
-  return arc
-    .map((value, index) => `<i class="${index === peak ? "hot" : ""}" style="height:${(8 + clamp01(value) * 42).toFixed(1)}px"></i>`)
+function refreshView(focusSelector = null) {
+  const scroll = window.scrollY;
+  renderView();
+  window.scrollTo(0, scroll);
+  if (focusSelector) {
+    const target = $(focusSelector);
+    if (target) target.focus({ preventScroll: true });
+  }
+}
+
+function updateFlowNav() {
+  const route = state.route;
+  const buttons = $$("#flowNav [data-nav]");
+  buttons.forEach((button) => {
+    const nav = button.dataset.nav;
+    const active =
+      (nav === "brief" && route.name === "brief") ||
+      (nav === "groups" && route.name === "groups") ||
+      (nav === "group" && route.name === "group") ||
+      (nav === "shortlist" && route.name === "shortlist") ||
+      (nav === "track" && route.name === "track");
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "step" : "false");
+    if (nav === "group") {
+      const fallback = route.groupId || state.trackById.get(route.trackId)?.cluster || state.lastGroupId;
+      button.disabled = !fallback;
+      button.dataset.group = fallback || "";
+    }
+    if (nav === "track") button.disabled = !route.trackId && route.name !== "track";
+  });
+  updateShortlistCount();
+}
+
+function renderView() {
+  const route = state.route;
+  if (route.name === "brief") renderBrief();
+  else if (route.name === "group") renderGroup(route.groupId);
+  else if (route.name === "shortlist") renderShortlist();
+  else if (route.name === "track") renderTrack(route.trackId);
+  else renderGroups();
+}
+
+function pageHead(kicker, title, subtitle, actions = "") {
+  return `<header class="page-head">
+    <div>
+      <div class="kicker">${esc(kicker)}</div>
+      <h1>${esc(title)}</h1>
+      <p class="lede">${esc(subtitle)}</p>
+    </div>
+    ${actions ? `<div class="page-actions">${actions}</div>` : ""}
+  </header>`;
+}
+
+/* ------------------------------ Brief ------------------------------ */
+
+function renderBrief() {
+  const brief = state.brief;
+  const types = state.usages.length
+    ? state.usages
+    : ["Ouverture", "Paysage/drone", "Transition", "Action/montage", "Portrait/intime", "Résolution/générique"];
+  const tones = Object.entries(TONES)
+    .map(
+      ([key, value]) =>
+        `<button class="chip${brief?.tone === key ? " active" : ""}" type="button" data-tone="${key}">${esc(value.label)}</button>`
+    )
     .join("");
-}
-
-function similarTracks(track) {
-  const eff = effective(track);
-  return state.tracks
-    .filter((t) => t.id !== track.id)
-    .map((t) => {
-      const e = effective(t);
-      const d = Math.hypot(e.valence - eff.valence, e.arousal - eff.arousal, 0.8 * (e.tension - eff.tension));
-      return { track: t, d };
-    })
-    .sort((a, b) => a.d - b.d)
-    .slice(0, 3);
-}
-
-function annotationTagChips(track) {
-  const selected = new Set(track.annotation?.tags || []);
-  return state.tags
-    .filter((tag) => tag.category === "émotion" || tag.category === "contexte")
-    .map((tag) => `<button type="button" class="chip${selected.has(tag.name) ? " active" : ""}" data-ann-tag="${esc(tag.name)}" aria-pressed="${selected.has(tag.name)}" style="--tag:${tag.color}"><i class="dot"></i>${esc(tag.name)}</button>`)
+  const typeChips = types
+    .map(
+      (type) =>
+        `<button class="chip${brief?.type === type ? " active" : ""}" type="button" data-brief-type="${esc(type)}">${esc(type)}</button>`
+    )
     .join("");
+  const durations = [8, 15, 30, 60]
+    .map(
+      (value) =>
+        `<button class="chip${Number(brief?.duration) === value ? " active" : ""}" type="button" data-duration="${value}">${value} s</button>`
+    )
+    .join("");
+
+  $("#view").innerHTML = `<div class="page">
+    ${pageHead(
+      "Étape 1 · optionnel",
+      "Cadrer le plan",
+      "Quelques secondes pour orienter la recherche. Vous pouvez passer cette étape."
+    )}
+    <form class="panel brief-form" id="briefForm">
+      <div class="field">
+        <label>Type de plan</label>
+        <input type="hidden" name="type" value="${esc(brief?.type || types[0])}">
+        <div class="chips" data-brief-types>${typeChips}</div>
+      </div>
+      <div class="field">
+        <label for="briefDuration">Durée du plan</label>
+        <div class="inline">
+          <input id="briefDuration" name="duration" type="number" min="4" max="600" step="1" value="${Number(brief?.duration) || 30}">
+          <span class="unit">secondes</span>
+        </div>
+        <div class="chips" data-durations>${durations}</div>
+      </div>
+      <div class="field">
+        <label>Ton recherché</label>
+        <input type="hidden" name="tone" value="${esc(brief?.tone || "calme")}">
+        <div class="chips" data-tones>${tones}</div>
+      </div>
+      <div class="field inline-checks">
+        <label class="check"><input type="checkbox" name="loop" ${brief?.loop ? "checked" : ""}> Le plan boucle</label>
+        <label class="check"><input type="checkbox" name="dialogue" ${brief?.dialogue ? "checked" : ""}> Il y a du dialogue</label>
+      </div>
+      <div class="form-actions">
+        <button class="btn primary" type="submit">${icon("arrow-right")} Explorer les groupes</button>
+        <a class="btn ghost" href="#/groups">Passer le brief</a>
+      </div>
+      ${brief ? `<p class="micro">Brief actuel : ${esc(briefSummary())} · <button class="link" type="button" data-clear-brief>Réinitialiser</button></p>` : ""}
+    </form>
+  </div>`;
+
+  $$("[data-brief-type]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $('[name="type"]').value = button.dataset.briefType;
+      $$("[data-brief-type]").forEach((item) => item.classList.toggle("active", item === button));
+    });
+  });
+  $$("[data-tone]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $('[name="tone"]').value = button.dataset.tone;
+      $$("[data-tone]").forEach((item) => item.classList.toggle("active", item === button));
+    });
+  });
+  $$("[data-duration]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("#briefDuration").value = button.dataset.duration;
+      $$("[data-duration]").forEach((item) => item.classList.toggle("active", item === button));
+    });
+  });
+  const clear = $("[data-clear-brief]");
+  if (clear) {
+    clear.addEventListener("click", () => {
+      state.brief = null;
+      writeJSON(STORAGE.brief, null);
+      renderBrief();
+    });
+  }
+  $("#briefForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    state.brief = {
+      type: String(form.get("type") || ""),
+      duration: Number(form.get("duration")) || 30,
+      tone: String(form.get("tone") || "calme"),
+      loop: form.get("loop") === "on",
+      dialogue: form.get("dialogue") === "on",
+    };
+    writeJSON(STORAGE.brief, state.brief);
+    navigate("groups");
+  });
 }
 
-function renderDetail() {
-  const track = selectedTrack();
-  if (!track) {
-    $("#detailEmpty").hidden = false;
-    $("#detailContent").hidden = true;
+/* ------------------------------ Groups ------------------------------ */
+
+function renderGroups() {
+  if (!state.library) {
+    renderFatal(new Error("Bibliothèque indisponible."));
     return;
   }
-  $("#detailEmpty").hidden = true;
-  $("#detailContent").hidden = false;
-  const eff = effective(track);
-  const a = track.annotation || {};
-  const tags = trackTags(track);
-  const topTags = Object.entries(track.tag_scores || {})
-    .filter(([name, score]) => !["Instrumental", "Littoral", "Aride/outback", "Brousse", "Nuit/route"].includes(name) && score >= 0.3)
-    .sort((x, y) => y[1] - x[1])
-    .slice(0, 6);
-  const usages = Object.entries(track.usage_scores || {}).sort((x, y) => y[1] - x[1]);
-  const similar = similarTracks(track);
-  const cluster = clusterFor(track);
-  const manualBadge = eff.manual ? `<span class="badge-manual">annotation manuelle</span>` : "";
-  const cuts = (track.cut_points || [])
-    .map((time) => `<button type="button" data-time="${Number(time)}">${fmtTime(time)}</button>`)
-    .join("");
-  const cutMarkers = (track.cut_points || []).length
-    ? `<div class="cut-list" aria-label="Points de coupe proposés">${cuts}</div>`
-    : `<div class="annotation-hint">Aucun point de coupe fiable détecté.</div>`;
+  const briefLine = state.brief
+    ? `<button class="brief-pill" type="button" data-edit-brief>${icon("info")} ${esc(briefSummary())} <span>modifier</span></button>`
+    : `<a class="brief-pill" href="#/brief">${icon("plus")} Cadrer le plan (optionnel)</a>`;
+  const results = state.search ? searchTracks(state.search) : [];
+  const groups = clustersAvailable() ? sortedRoots() : [];
+  const treemap = groups.length
+    ? treemapHtml(
+        groups.map(({ node, score }) => ({
+          id: node.id,
+          label: node.name,
+          value: node.size,
+          color: node.color,
+          meta: `${node.size} pistes${score !== null ? ` · ${Math.round(score * 100)} % brief` : ""}`,
+          sort: score !== null ? score : node.size,
+          tags: (node.top_tags || []).slice(0, 2).map((tag) => tag.name),
+          stability: node.stability,
+        })),
+        "group"
+      )
+    : `<div class="empty">Aucun groupe disponible. Relancez l’analyse pour générer les clusters.</div>`;
 
-  $("#detailContent").innerHTML = `<div class="detail-inner">
-    <div class="detail-hero">
-      <div class="detail-kicker">${esc(FAMILY_SHORT[track.family] || track.family)} · ${esc(track.genre)} ${manualBadge}</div>
-      <h2>${esc(track.title)}</h2>
-      <div class="detail-artist">${esc(track.artist)}</div>
-      ${cluster ? `<button class="cluster-link" type="button" data-cluster-link="${esc(cluster.id)}" style="--cluster:${cluster.color}"><i></i>${esc(cluster.name)} · ${cluster.size} pistes</button>` : ""}
-      <div class="detail-tags">${tags.map((tag) => tagChip(tag)).join("")}</div>
-      <div class="detail-actions">
-        <button class="btn primary" type="button" data-action="play-hook">${icon("play")} Écouter le hook</button>
-        <button class="btn ghost" type="button" data-action="fav" aria-pressed="${state.favorites.has(track.id)}">${icon("star")} ${state.favorites.has(track.id) ? "Favori" : "Favoris"}</button>
-        <a class="btn ghost" href="${esc(track.source_url)}" target="_blank" rel="noopener">Source ${icon("external")}</a>
-      </div>
+  $("#view").innerHTML = `<div class="page">
+    ${pageHead(
+      "Étape 2",
+      state.search ? "Résultats de recherche" : "Explorer par groupes",
+      state.search
+        ? `${results.length} piste(s) trouvée(s) pour « ${state.search} »`
+        : "Partez d’un grand groupe, puis affinez. Chaque clic réduit réellement le nombre de pistes.",
+      `<a class="btn primary" href="#/shortlist">${icon("star")} Ma short-list <b id="shortlistInline">${state.shortlist.size}</b></a>`
+    )}
+    <div class="toolbar">
+      <label class="searchbox">
+        ${icon("search")}
+        <input id="searchInput" type="search" value="${esc(state.search)}" placeholder="Rechercher un titre, un artiste, un tag…" aria-label="Rechercher dans la bibliothèque" autocomplete="off">
+        ${state.search ? `<button class="icon-btn" type="button" data-clear-search aria-label="Effacer">${icon("close")}</button>` : "<kbd>/</kbd>"}
+      </label>
+      ${briefLine}
+      <span class="toolbar-note">${groups.length ? `${groups.length} groupes · ${state.tracks.length} pistes` : ""}</span>
     </div>
-
-    <div class="detail-section">
-      <div class="stat-grid">
-        <div class="stat"><span>BPM</span><b>${Math.round(Number(track.bpm) || 0)}</b></div>
-        <div class="stat"><span>Tonalité</span><b>${esc(track.key || "—")}</b></div>
-        <div class="stat"><span>Durée</span><b>${fmtDur(track.duration)}</b></div>
-        <div class="stat"><span>Confiance</span><b>${fmtPct(track.confidence)}</b></div>
-        <div class="stat"><span>Loudness source</span><b>${track.loudness_lufs ?? track.features?.loudness_input_lufs ?? "—"} LUFS</b></div>
-        <div class="stat"><span>Hook</span><b>${fmtTime(track.hook_start)} (+${Math.round(track.hook_duration || 12)} s)</b></div>
-      </div>
-    </div>
-
-    ${cluster ? `<div class="detail-section">
-      <h3>Cluster de similarité</h3>
-      <p class="cluster-desc">${esc(cluster.description || "")}</p>
-      <div class="chips cluster-tags">${(cluster.top_tags || []).map((tag) => `<span class="chip compact" style="--tag:${cluster.color}"><i class="dot"></i>${esc(tag.name)}</span>`).join("")}</div>
-    </div>` : ""}
-
-    <div class="detail-section">
-      <h3>Profil affectif estimé</h3>
-      <div class="gauges">
-        ${gauge("Valence", eff.valence, "mélancolique → solaire", "var(--accent-2)")}
-        ${gauge("Arousal", eff.arousal, "calme → énergique", "var(--calm)")}
-        ${gauge("Tension", eff.tension, "résolution → attente", "var(--tense)")}
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Tonalité et chroma</h3>
-      <div class="key-wrap">
-        ${keyWheel(track)}
-        <div class="key-info">
-          <strong>${esc(track.key || "—")}</strong>
-          <span>${esc(track.mode === "major" ? "mode majeur" : "mode mineur")} · ${Math.round(Number(track.bpm) || 0)} BPM</span>
-          <span class="key-conf">confiance tonale ${fmtPct(track.key_confidence)}</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Arc temporel</h3>
-      <div class="arc">${arcBars(track)}</div>
-      <div class="arc-meta"><span>intro ${fmtTime(track.intro_end)}</span><span>pic ${fmtTime(track.peak_time)}</span><span>sortie ${fmtTime(track.outro_start)}</span></div>
-      <div class="arc-meta" style="margin-top:5px"><span>${esc(track.arc_type || "steady")}</span><span>loop ${fmtPct(track.loopability)}</span></div>
-      <h3 style="margin-top:12px">Points de coupe</h3>
-      ${cutMarkers}
-    </div>
-
-    <div class="detail-section">
-      <h3>Tags estimés</h3>
-      <div class="tag-score-list">
-        ${topTags.map(([name, score]) => `<div class="tag-score" style="--tag:${tagMeta(name).color}"><span>${esc(name)}</span><span class="bar"><i style="width:${(clamp01(score) * 100).toFixed(1)}%"></i></span><b>${score.toFixed(2)}</b></div>`).join("")}
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Usages cinéma</h3>
-      <div class="usage-list">
-        ${usages.map(([name, score]) => `<div class="usage-row"><span>${esc(name)}</span><span class="bar"><i style="width:${(clamp01(score) * 100).toFixed(1)}%"></i></span><b>${score.toFixed(2)}</b></div>`).join("")}
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Pistes proches</h3>
-      <div class="similar-list">
-        ${similar.map(({ track: near, d }) => `<button class="similar" type="button" data-similar="${esc(near.id)}"><span>${esc(near.title)} · ${esc(near.artist)}</span><b>d ${d.toFixed(2)}</b></button>`).join("")}
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Licence et crédit</h3>
-      <div class="license-box">
-        <strong>${esc(track.license)}</strong> · crédit : ${esc(track.credit)}<br>
-        <a href="${esc(track.source_url)}" target="_blank" rel="noopener">Page source YouTube ${icon("external")}</a>
-        ${track.license_url ? ` · <a href="${esc(track.license_url)}" target="_blank" rel="noopener">Texte de la licence</a>` : ""}
-        <div class="license-note">Vérifier la licence et conserver ce crédit avant publication. Content ID peut revendiquer une piste même sous licence libre.</div>
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Annotation manuelle</h3>
-      <form class="annotation-form" id="annotationForm">
-        ${annSlider("valence", "Valence", a.valence ?? eff.valence)}
-        ${annSlider("arousal", "Arousal", a.arousal ?? eff.arousal)}
-        ${annSlider("tension", "Tension", a.tension ?? eff.tension)}
-        <div class="ann-tags">${annotationTagChips(track)}</div>
-        <textarea id="annNote" placeholder="Note d’écoute, plan prévu, réserve…">${esc(a.note || "")}</textarea>
-        <div class="annotation-actions">
-          <button class="btn primary" type="submit">${icon("check")} Enregistrer</button>
-          ${a.updated_at ? `<button class="link" type="button" data-action="clear-annotation">Effacer</button>` : ""}
-        </div>
-        <div class="annotation-hint">Les annotations sont locales, exportées dans la base. Elles remplacent les valeurs auto sur la carte.</div>
-      </form>
+    ${state.search ? renderSearchResults(results) : treemap}
+    <div class="flow-hint">
+      <span>${icon("arrow-right")} Cliquez un groupe pour voir ses sous-groupes et ses pistes.</span>
+      ${state.shortlist.size ? `<a href="#/shortlist">Continuer avec ${state.shortlist.size} piste(s) →</a>` : ""}
     </div>
   </div>`;
+
+  bindSearch();
+  if (state.search) bindTrackGrid();
 }
 
-function gauge(label, value, legend, color) {
-  const v = Math.max(-1, Math.min(1, Number(value) || 0));
-  const pct = ((v + 1) / 2) * 100;
-  return `<div><div class="gauge-head"><span>${esc(label)} <span class="micro">${esc(legend)}</span></span><b>${fmtSigned(v)}</b></div><div class="gauge-track"><span class="gauge-fill" style="width:${pct.toFixed(1)}%;--gauge-color:${color}"></span><span class="gauge-mid"></span></div></div>`;
+function sortedRoots() {
+  return state.roots
+    .map((id) => {
+      const node = state.nodes.get(id);
+      return { node, score: groupScore(node) };
+    })
+    .filter((item) => item.node)
+    .sort((a, b) => {
+      if (state.brief) return (b.score || 0) - (a.score || 0);
+      return b.node.size - a.node.size;
+    });
+}
+
+function renderSearchResults(results) {
+  if (!results.length) {
+    return `<div class="empty">Aucun résultat. Essayez un autre terme ou <button class="link" type="button" data-clear-search>effacez la recherche</button>.</div>`;
+  }
+  return `<div class="track-grid">${results.map((track) => trackCard(track)).join("")}</div>`;
+}
+
+function bindSearch() {
+  const input = $("#searchInput");
+  if (!input) return;
+  input.addEventListener("input", () => {
+    state.search = input.value.trim();
+    refreshView("#searchInput");
+  });
+  const clear = $("[data-clear-search]");
+  if (clear) {
+    clear.addEventListener("click", () => {
+      state.search = "";
+      refreshView("#searchInput");
+    });
+  }
+  const edit = $("[data-edit-brief]");
+  if (edit) edit.addEventListener("click", () => navigate("brief"));
+}
+
+/* ------------------------------ Group ------------------------------ */
+
+function renderGroup(groupId) {
+  const node = state.nodes.get(groupId);
+  if (!node) {
+    $("#view").innerHTML = `<div class="page">${pageHead("Étape 3", "Groupe introuvable", "Ce groupe n’existe pas.")}<a class="btn primary" href="#/groups">Retour aux groupes</a></div>`;
+    return;
+  }
+  if (state.lastGroupId !== groupId) {
+    state.groupFilters = { tag: "", duration: "all" };
+    state.showTracks = false;
+    state.lastGroupId = groupId;
+  }
+  const path = [];
+  let cursor = node;
+  while (cursor) {
+    path.unshift(cursor);
+    cursor = cursor.parent ? state.nodes.get(cursor.parent) : null;
+  }
+  const breadcrumb = `<nav class="breadcrumb" aria-label="Fil d’Ariane">
+    <a href="#/groups">Explorer</a>
+    ${path
+      .map((item, index) => {
+        const last = index === path.length - 1;
+        return `<span aria-hidden="true">›</span>${
+          last
+            ? `<span aria-current="page">${esc(item.name)}</span>`
+            : `<a href="#/group/${encodeURIComponent(item.id)}">${esc(item.name)}</a>`
+        }`;
+      })
+      .join("")}
+  </nav>`;
+
+  const children = (node.children || [])
+    .map((id) => state.nodes.get(id))
+    .filter(Boolean);
+  const tracks = filteredNodeTracks(node);
+  const showChildren = children.length > 0 && !state.showTracks;
+  const lead = children.length
+    ? `${children.length} sous-groupes · ${node.size} pistes au total`
+    : `${node.size} pistes · ${clusterPathLabel(node)}`;
+
+  let body = "";
+  if (showChildren) {
+    body = treemapHtml(
+      children.map((child) => ({
+        id: child.id,
+        label: child.name,
+        value: child.size,
+        color: child.color || node.color,
+        meta: `${child.size} pistes`,
+        tags: (child.top_tags || []).slice(0, 2).map((tag) => tag.name),
+        stability: child.stability,
+      })),
+      "group"
+    );
+  } else {
+    body = `<div class="split">
+      <div class="split-main">${renderTrackList(tracks, node)}</div>
+      <aside class="split-side">${scatterHtml(tracks, node)}</aside>
+    </div>`;
+  }
+
+  $("#view").innerHTML = `<div class="page">
+    ${breadcrumb}
+    ${pageHead(
+      node.level === 1 ? "Groupe" : node.level === 2 ? "Sous-groupe" : "Famille fine",
+      node.name,
+      lead,
+      `${children.length ? `<button class="btn ghost" type="button" data-toggle-tracks>${state.showTracks ? "Voir les sous-groupes" : `Voir les ${node.size} pistes`}</button>` : ""}
+       <a class="btn primary" href="#/shortlist">${icon("star")} Short-list <b id="shortlistInline">${state.shortlist.size}</b></a>`
+    )}
+    <div class="group-meta">
+      ${node.stability ? `<span class="badge">stabilité ${Math.round(node.stability * 100)} %</span>` : ""}
+      ${node.silhouette ? `<span class="badge">silhouette ${Number(node.silhouette).toFixed(2)}</span>` : ""}
+      ${(node.top_tags || []).slice(0, 4).map((tag) => `<span class="tag" style="--tag:${tagColor(tag.name)}">${esc(tag.name)}</span>`).join("")}
+      <span class="micro">${esc(node.description || "")}</span>
+    </div>
+    ${body}
+  </div>`;
+
+  bindTrackGrid();
+}
+
+function clusterPathLabel(node) {
+  const parts = [];
+  let cursor = node;
+  while (cursor && cursor.parent) {
+    cursor = state.nodes.get(cursor.parent);
+    if (cursor) parts.unshift(cursor.name);
+  }
+  return parts.length ? parts.join(" › ") : "groupe racine";
+}
+
+function filteredNodeTracks(node) {
+  let list = (node.track_ids || [])
+    .map((id) => state.trackById.get(id))
+    .filter(Boolean);
+  if (state.groupFilters.tag) {
+    list = list.filter((track) => trackTags(track).includes(state.groupFilters.tag));
+  }
+  if (state.groupFilters.duration !== "all") {
+    list = list.filter((track) => {
+      const minutes = Number(track.duration || 0) / 60;
+      if (state.groupFilters.duration === "short") return minutes < 2;
+      if (state.groupFilters.duration === "medium") return minutes >= 2 && minutes <= 4;
+      return minutes > 4;
+    });
+  }
+  return sortedTracks(list);
+}
+
+function renderTrackList(tracks, node) {
+  const tagChips = (node.top_tags || [])
+    .slice(0, 4)
+    .map((tag) => {
+      const active = state.groupFilters.tag === tag.name;
+      return `<button class="chip${active ? " active" : ""}" type="button" data-tag-filter="${esc(tag.name)}" aria-pressed="${active}" style="--tag:${tagColor(tag.name)}"><i class="dot"></i>${esc(tag.name)}</button>`;
+    })
+    .join("");
+  const durations = [
+    ["all", "Toutes"],
+    ["short", "< 2 min"],
+    ["medium", "2–4 min"],
+    ["long", "> 4 min"],
+  ]
+    .map(
+      ([key, label]) =>
+        `<button class="chip${state.groupFilters.duration === key ? " active" : ""}" type="button" data-duration-filter="${key}" aria-pressed="${state.groupFilters.duration === key}">${label}</button>`
+    )
+    .join("");
+  return `<div class="filter-bar">
+      <span class="micro">Affiner :</span>
+      <div class="chips">${tagChips}${durations}</div>
+      <span class="micro">${tracks.length} piste(s)</span>
+    </div>
+    <div class="track-grid">${tracks.length ? tracks.map((track) => trackCard(track)).join("") : `<div class="empty">Aucune piste avec ces filtres.</div>`}</div>`;
+}
+
+function bindTrackGrid() {
+  $$("[data-tag-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tag = button.dataset.tagFilter;
+      state.groupFilters.tag = state.groupFilters.tag === tag ? "" : tag;
+      refreshView();
+    });
+  });
+  $$("[data-duration-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.groupFilters.duration = button.dataset.durationFilter;
+      refreshView();
+    });
+  });
+  $$("[data-preview]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const track = state.trackById.get(button.dataset.preview);
+      if (track) playTrack(track, { preview: true });
+    });
+  });
+  $$("[data-remove]").forEach((button) => {
+    button.addEventListener("click", () => {
+      removeFromShortlist(button.dataset.remove);
+      refreshView();
+    });
+  });
+  $$("[data-compare]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const id = checkbox.dataset.compare;
+      if (checkbox.checked) {
+        if (state.compare.length >= 3) {
+          checkbox.checked = false;
+          showToast("Comparaison limitée à 3 pistes.", "warn");
+          return;
+        }
+        state.compare.push(id);
+      } else {
+        state.compare = state.compare.filter((item) => item !== id);
+      }
+      refreshView();
+    });
+  });
+  $$("[data-status]").forEach((select) => {
+    select.addEventListener("change", () => {
+      setShortlistStatus(select.dataset.status, select.value);
+      refreshView();
+    });
+  });
+  $$("[data-note]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const entry = state.shortlist.get(input.dataset.note);
+      if (entry) {
+        entry.note = input.value.trim();
+        saveShortlist();
+        showToast("Note enregistrée.");
+      }
+    });
+  });
+}
+
+/* ------------------------------ Cards ------------------------------ */
+
+function trackCard(track) {
+  const entry = shortlistEntry(track.id);
+  const path = clusterPath(track);
+  const effect = effective(track);
+  const addLabel = entry ? `${STATUS[entry.status]}` : "+ Short-list";
+  const reasons = briefReasons(track);
+  return `<article class="track-card">
+    <div class="tc-top">
+      <a class="tc-title" href="#/track/${encodeURIComponent(track.id)}">${esc(track.title)}</a>
+      <span class="tc-dur">${fmtDur(track.duration)}</span>
+    </div>
+    <div class="tc-sub">${esc(track.artist)}${path.length ? ` · ${esc(path[path.length - 1])}` : ""}</div>
+    <div class="tc-tags">${visibleTags(track).slice(0, 3).map((tag) => `<span class="tag" style="--tag:${tagColor(tag)}">${esc(tag)}</span>`).join("")}</div>
+    <div class="tc-meta">
+      <span>${Math.round(Number(track.bpm) || 0)} BPM</span>
+      <span>V ${fmtSigned(effect.valence)}</span>
+      <span>A ${fmtSigned(effect.arousal)}</span>
+      ${state.brief ? `<span class="score">${Math.round(briefScore(track) * 100)} %</span>` : ""}
+    </div>
+    ${reasons.length ? `<div class="tc-reasons">${reasons.map((reason) => `<span>${esc(reason)}</span>`).join("")}</div>` : ""}
+    <div class="tc-actions">
+      <button class="btn small" type="button" data-preview="${esc(track.id)}">${icon("play")} 12 s</button>
+      <button class="btn small ghost${entry ? " active" : ""}" type="button" data-add="${esc(track.id)}">${icon("plus")} ${esc(addLabel)}</button>
+      <a class="btn small ghost" href="#/track/${encodeURIComponent(track.id)}">Analyser</a>
+    </div>
+  </article>`;
+}
+
+/* ------------------------------ Treemap ------------------------------ */
+
+function binaryTreemap(items, x, y, width, height, output = []) {
+  if (!items.length) return output;
+  if (items.length === 1) {
+    output.push({ ...items[0], x, y, width, height });
+    return output;
+  }
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  let running = 0;
+  let split = 1;
+  let best = Infinity;
+  for (let index = 0; index < items.length - 1; index += 1) {
+    running += items[index].value;
+    const difference = Math.abs(running - total / 2);
+    if (difference < best) {
+      best = difference;
+      split = index + 1;
+    }
+  }
+  const left = items.slice(0, split);
+  const right = items.slice(split);
+  const leftValue = left.reduce((sum, item) => sum + item.value, 0);
+  const ratio = total ? leftValue / total : 0.5;
+  if (width >= height) {
+    const leftWidth = width * ratio;
+    binaryTreemap(left, x, y, leftWidth, height, output);
+    binaryTreemap(right, x + leftWidth, y, width - leftWidth, height, output);
+  } else {
+    const leftHeight = height * ratio;
+    binaryTreemap(left, x, y, width, leftHeight, output);
+    binaryTreemap(right, x, y + leftHeight, width, height - leftHeight, output);
+  }
+  return output;
+}
+
+function treemapHtml(items, mode) {
+  if (!items.length) return `<div class="empty">Aucun élément.</div>`;
+  const sorted = [...items].sort((a, b) => (b.sort ?? b.value) - (a.sort ?? a.value));
+  const rects = binaryTreemap(sorted, 0, 0, 1, 1);
+  return `<div class="treemap">${rects
+    .map((rect) => {
+      const area = rect.width * rect.height;
+      const small = area < 0.045;
+      const tiny = area < 0.018;
+      const stability = rect.stability ? ` · stabilité ${Math.round(rect.stability * 100)} %` : "";
+      return `<button class="tm-tile${small ? " small" : ""}${tiny ? " tiny" : ""}" type="button" data-${mode}="${esc(rect.id)}" style="left:${(rect.x * 100).toFixed(3)}%;top:${(rect.y * 100).toFixed(3)}%;width:${(rect.width * 100).toFixed(3)}%;height:${(rect.height * 100).toFixed(3)}%;--c:${rect.color || "var(--accent)"}" aria-label="${esc(rect.label)} — ${esc(rect.meta || "")}${stability}">
+        <span class="tm-name">${esc(rect.label)}</span>
+        <span class="tm-meta">${esc(rect.meta || "")}${stability}</span>
+        ${rect.tags?.length && !small ? `<span class="tm-tags">${rect.tags.map((tag) => esc(tag)).join(" · ")}</span>` : ""}
+      </button>`;
+    })
+    .join("")}</div>`;
+}
+
+/* ------------------------------ Shortlist ------------------------------ */
+
+function renderShortlist() {
+  const entries = [...state.shortlist.values()]
+    .map((entry) => ({ entry, track: state.trackById.get(entry.id) }))
+    .filter((item) => item.track)
+    .sort((a, b) => a.entry.order - b.entry.order);
+  const counts = Object.fromEntries(STATUS_ORDER.map((status) => [status, 0]));
+  entries.forEach(({ entry }) => {
+    counts[entry.status] = (counts[entry.status] || 0) + 1;
+  });
+  const chosen = entries.find(({ entry }) => entry.status === "choisi");
+  const filtered = state.shortlistFilter
+    ? entries.filter(({ entry }) => entry.status === state.shortlistFilter)
+    : entries;
+  const compareTracks = state.compare
+    .map((id) => state.trackById.get(id))
+    .filter(Boolean);
+
+  let body = "";
+  if (!entries.length) {
+    body = `<div class="empty big">
+      <h2>Votre short-list est vide</h2>
+      <p>Parcourez un groupe, écoutez quelques extraits et ajoutez 5 à 15 candidates. Vous pourrez les comparer ici.</p>
+      <a class="btn primary" href="#/groups">Explorer les groupes</a>
+    </div>`;
+  } else {
+    const cards = filtered
+      .map(({ entry, track }) => shortlistCard(entry, track))
+      .join("");
+    body = `<div class="status-tabs" role="tablist" aria-label="Statuts">
+        <button class="chip${!state.shortlistFilter ? " active" : ""}" type="button" role="tab" aria-selected="${!state.shortlistFilter}" data-status-filter="">Toutes <b>${entries.length}</b></button>
+        ${STATUS_ORDER.map(
+          (status) =>
+            `<button class="chip${state.shortlistFilter === status ? " active" : ""}" type="button" role="tab" aria-selected="${state.shortlistFilter === status}" data-status-filter="${status}">${STATUS[status]} <b>${counts[status] || 0}</b></button>`
+        ).join("")}
+      </div>
+      ${compareTracks.length >= 2 ? renderCompare(compareTracks) : ""}
+      <div class="sl-list">${cards || `<div class="empty">Aucune piste dans ce statut.</div>`}</div>`;
+  }
+
+  $("#view").innerHTML = `<div class="page">
+    ${pageHead(
+      "Étape 4",
+      "Short-list",
+      chosen
+        ? `Piste choisie : ${chosen.track.title} — ${chosen.track.artist}.`
+        : entries.length
+          ? "Écoutez, statuez, comparez. Objectif : 5 à 15 candidates, puis une décision."
+          : "Constituez votre sélection de finalistes.",
+      `<a class="btn ghost" href="#/groups">${icon("arrow-left")} Explorer</a>
+       <button class="btn primary" type="button" data-export="json" ${entries.length ? "" : "disabled"}>${icon("download")} Exporter la sélection</button>`
+    )}
+    <div class="toolbar">
+      <span class="micro">${entries.length} piste(s) · ${counts.retenu || 0} retenue(s) · ${counts.choisi || 0} choisie(s)</span>
+      <div class="chips">
+        <button class="chip" type="button" data-export="csv" ${entries.length ? "" : "disabled"}>CSV</button>
+        <button class="chip" type="button" data-action="copy-credits" ${entries.length ? "" : "disabled"}>Copier les crédits</button>
+        ${chosen ? `<button class="chip" type="button" data-export="md">Fiche de décision</button>` : ""}
+      </div>
+    </div>
+    ${body}
+  </div>`;
+
+  $$("[data-status-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.shortlistFilter = button.dataset.statusFilter || null;
+      refreshView();
+    });
+  });
+  bindTrackGrid();
+}
+
+function shortlistCard(entry, track) {
+  const path = clusterPath(track);
+  return `<article class="sl-card${entry.status === "choisi" ? " chosen" : ""}">
+    <div class="sl-top">
+      <a class="tc-title" href="#/track/${encodeURIComponent(track.id)}">${esc(track.title)}</a>
+      <span class="tc-dur">${fmtDur(track.duration)}</span>
+    </div>
+    <div class="tc-sub">${esc(track.artist)}${path.length ? ` · ${esc(path.join(" › "))}` : ""}</div>
+    <div class="sl-controls">
+      <label class="field-inline">Statut
+        <select data-status="${esc(track.id)}">
+          ${STATUS_ORDER.map(
+            (status) =>
+              `<option value="${status}" ${entry.status === status ? "selected" : ""}>${STATUS[status]}</option>`
+          ).join("")}
+        </select>
+      </label>
+      <label class="field-inline grow">Note
+        <input type="text" data-note="${esc(track.id)}" value="${esc(entry.note)}" placeholder="Plan, réserve, raison…">
+      </label>
+    </div>
+    <div class="sl-actions">
+      <button class="btn small" type="button" data-preview="${esc(track.id)}">${icon("play")} 12 s</button>
+      <a class="btn small ghost" href="#/track/${encodeURIComponent(track.id)}">Analyser</a>
+      <label class="check small"><input type="checkbox" data-compare="${esc(track.id)}" ${state.compare.includes(track.id) ? "checked" : ""}> Comparer</label>
+      <button class="btn small danger" type="button" data-remove="${esc(track.id)}">${icon("trash")} Retirer</button>
+    </div>
+  </article>`;
+}
+
+function renderCompare(tracks) {
+  const rows = [
+    ["Valence", (track) => fmtSigned(effective(track).valence)],
+    ["Arousal", (track) => fmtSigned(effective(track).arousal)],
+    ["Tension", (track) => fmtSigned(effective(track).tension)],
+    ["Énergie", (track) => fmtPct(track.energy)],
+    ["BPM", (track) => Math.round(Number(track.bpm) || 0)],
+    ["Durée", (track) => fmtDur(track.duration)],
+    ["Confiance", (track) => fmtPct(track.confidence)],
+    ["Boucle", (track) => fmtPct(track.loopability)],
+  ];
+  if (state.brief) rows.push(["Brief", (track) => `${Math.round(briefScore(track) * 100)} %`]);
+  rows.push(["Licence", (track) => track.license || "—"]);
+  return `<section class="panel compare-panel">
+    <div class="panel-head"><div><h2>Comparer</h2><p class="micro">${tracks.length} pistes sélectionnées</p></div><button class="btn ghost small" type="button" data-compare-clear>Vider</button></div>
+    <div class="table-scroll"><table class="compare-table">
+      <thead><tr><th></th>${tracks.map((track) => `<th>${esc(track.title)}</th>`).join("")}</tr></thead>
+      <tbody>${rows
+        .map(
+          ([label, render]) =>
+            `<tr><th>${esc(label)}</th>${tracks.map((track) => `<td>${esc(render(track))}</td>`).join("")}</tr>`
+        )
+        .join("")}</tbody>
+    </table></div>
+    <div class="panel-actions">
+      <button class="btn small" type="button" data-play-compare>Écouter A puis B (6 s)</button>
+      ${tracks.some((track) => shortlistEntry(track.id)?.status === "choisi") ? "" : `<button class="btn small primary" type="button" data-choose="${esc(tracks[0].id)}">Choisir ${esc(tracks[0].title)}</button>`}
+    </div>
+  </section>`;
+}
+
+/* ------------------------------ Track ------------------------------ */
+
+function renderTrack(trackId) {
+  const track = state.trackById.get(trackId);
+  if (!track) {
+    $("#view").innerHTML = `<div class="page">${pageHead("Étape 5", "Piste introuvable", "Cette piste n’existe pas.")}<a class="btn primary" href="#/groups">Retour</a></div>`;
+    return;
+  }
+  const effect = effective(track);
+  const entry = shortlistEntry(track.id);
+  const path = clusterPath(track);
+  const reasons = briefReasons(track);
+  const topTags = Object.entries(track.tag_scores || {})
+    .filter(([name]) => name !== "Instrumental")
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 7);
+  const usages = Object.entries(track.usage_scores || {}).sort((a, b) => b[1] - a[1]);
+  const similar = state.tracks
+    .filter((item) => item.id !== track.id)
+    .map((item) => {
+      const other = effective(item);
+      const distance = Math.hypot(
+        other.valence - effect.valence,
+        other.arousal - effect.arousal,
+        0.8 * (other.tension - effect.tension)
+      );
+      return { track: item, distance };
+    })
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 4);
+
+  $("#view").innerHTML = `<div class="page">
+    <a class="back-link" href="${path.length ? `#/group/${encodeURIComponent(track.cluster)}` : "#/groups"}">${icon("arrow-left")} Retour au groupe</a>
+    <header class="track-hero">
+      <div>
+        <div class="kicker">${esc(track.family)} · ${esc(track.genre)}${effect.manual ? " · annotation manuelle" : ""}${state.brief ? ` · ${Math.round(briefScore(track) * 100)} % brief` : ""}</div>
+        <h1>${esc(track.title)}</h1>
+        <p class="lede">${esc(track.artist)}${path.length ? ` · ${esc(path.join(" › "))}` : ""}</p>
+        <div class="tc-tags">${visibleTags(track).map((tag) => `<span class="tag" style="--tag:${tagColor(tag)}">${esc(tag)}</span>`).join("")}</div>
+      </div>
+      <div class="hero-actions">
+        <button class="btn primary" type="button" data-preview="${esc(track.id)}">${icon("play")} Écouter 12 s</button>
+        <button class="btn ghost" type="button" data-play-full="${esc(track.id)}">Écouter en entier</button>
+        ${entry ? `<span class="badge">${STATUS[entry.status]}</span>` : `<button class="btn ghost" type="button" data-add="${esc(track.id)}">${icon("plus")} Short-list</button>`}
+      </div>
+    </header>
+    ${reasons.length ? `<div class="reason-bar">${reasons.map((reason) => `<span>${esc(reason)}</span>`).join("")}</div>` : ""}
+    <div class="detail-grid">
+      <section class="panel decision">
+        <div class="panel-head"><div><h2>Décider</h2><p class="micro">Les chiffres utiles au montage</p></div></div>
+        <div class="stat-grid">
+          <div class="stat"><span>Durée</span><b>${fmtDur(track.duration)}</b></div>
+          <div class="stat"><span>BPM</span><b>${Math.round(Number(track.bpm) || 0)}</b></div>
+          <div class="stat"><span>Tonalité</span><b>${esc(track.key || "—")}</b></div>
+          <div class="stat"><span>Hook</span><b>${fmtTime(track.hook_start)}</b></div>
+          <div class="stat"><span>Boucle</span><b>${fmtPct(track.loopability)}</b></div>
+          <div class="stat"><span>Confiance</span><b>${fmtPct(track.confidence)}</b></div>
+        </div>
+        <div class="gauges">
+          ${gauge("Valence", effect.valence, "mélancolique → solaire", "var(--accent-2)")}
+          ${gauge("Arousal", effect.arousal, "calme → énergique", "var(--calm)")}
+          ${gauge("Tension", effect.tension, "résolution → attente", "var(--tense)")}
+        </div>
+        <div class="panel-actions">
+          ${entry?.status === "choisi" ? `<span class="chosen-pill">${icon("check")} Piste choisie</span>` : `<button class="btn primary" type="button" data-choose="${esc(track.id)}">${icon("check")} Choisir cette piste</button>`}
+          <button class="btn ghost" type="button" data-download="${esc(track.id)}">${icon("download")} MP3</button>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div><h2>Comprendre</h2><p class="micro">Graphiques et structure</p></div></div>
+        <details class="fold">
+          <summary>Arc temporel</summary>
+          ${arcHtml(track)}
+        </details>
+        <details class="fold">
+          <summary>Chroma et tonalité</summary>
+          ${chromaHtml(track)}
+        </details>
+        <details class="fold">
+          <summary>Tags estimés</summary>
+          <div class="bars">${topTags.map(([name, score]) => barRow(name, score, tagColor(name))).join("")}</div>
+        </details>
+        <details class="fold">
+          <summary>Usages cinéma</summary>
+          <div class="bars">${usages.map(([name, score]) => barRow(name, score, "var(--accent)")).join("")}</div>
+        </details>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div><h2>Licence et crédit</h2><p class="micro">À conserver avec le MP3</p></div></div>
+        <div class="license-box">
+          <p><strong>${esc(track.license)}</strong> · crédit : ${esc(track.credit)}</p>
+          <p class="micro">Vérifiez la licence et conservez ce crédit avant publication. Content ID peut revendiquer une piste même sous licence libre.</p>
+          <div class="chips">
+            <button class="chip" type="button" data-copy-credit="${esc(track.id)}">${icon("copy")} Copier le crédit</button>
+            <a class="chip" href="${esc(track.source_url)}" target="_blank" rel="noopener">${icon("external")} Source</a>
+            ${track.license_url ? `<a class="chip" href="${esc(track.license_url)}" target="_blank" rel="noopener">Texte de la licence</a>` : ""}
+          </div>
+        </div>
+        <details class="annotation-details">
+          <summary>Annotation manuelle <span class="micro">locale, prioritaire sur les scores auto</span></summary>
+          ${annotationHtml(track)}
+        </details>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div><h2>Pistes proches</h2><p class="micro">Même voisinage affectif</p></div></div>
+        <div class="similar-list">
+          ${similar.map(({ track: near, distance }) => `<a class="similar" href="#/track/${encodeURIComponent(near.id)}"><span>${esc(near.title)} · ${esc(near.artist)}</span><b>d ${distance.toFixed(2)}</b></a>`).join("")}
+        </div>
+      </section>
+    </div>
+  </div>`;
+
+  bindTrackGrid();
+  bindTrackExtras(track);
+}
+
+function bindTrackExtras(track) {
+  $$("[data-play-full]").forEach((button) => {
+    button.addEventListener("click", () => playTrack(track, { preview: false }));
+  });
+  $$("[data-download]").forEach((button) => {
+    button.addEventListener("click", () => downloadTrack(track.id));
+  });
+  const form = $("#annotationForm");
+  if (form) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = {
+        track_id: track.id,
+        valence: Number($("#ann-valence").value),
+        arousal: Number($("#ann-arousal").value),
+        tension: Number($("#ann-tension").value),
+        tags: $$(".ann-tag.active").map((node) => node.dataset.annTag),
+        note: $("#annNote").value.trim(),
+      };
+      try {
+        const response = await fetch("/api/annotations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error("Enregistrement impossible");
+        const data = await response.json();
+        track.annotation = { ...payload, updated_at: data.updated_at };
+        showToast("Annotation enregistrée.");
+        refreshView();
+      } catch (error) {
+        showToast(error.message || "Annotation impossible.", "error");
+      }
+    });
+    form.addEventListener("input", (event) => {
+      if (event.target.matches(".ann-slider input")) {
+        const output = event.target.parentElement.querySelector("output");
+        if (output) output.textContent = fmtSigned(event.target.value);
+      }
+    });
+    const clear = $("[data-clear-annotation]");
+    if (clear) {
+      clear.addEventListener("click", async () => {
+        try {
+          await fetch(`/api/annotations/${encodeURIComponent(track.id)}`, { method: "DELETE" });
+          track.annotation = null;
+          showToast("Annotation effacée.");
+          refreshView();
+        } catch {
+          showToast("Suppression impossible.", "error");
+        }
+      });
+    }
+  }
+  $$(".ann-tag").forEach((button) => {
+    button.addEventListener("click", () => {
+      button.classList.toggle("active");
+      button.setAttribute("aria-pressed", button.classList.contains("active") ? "true" : "false");
+    });
+  });
+}
+
+function annotationHtml(track) {
+  const annotation = track.annotation || {};
+  const effect = effective(track);
+  const selected = new Set(annotation.tags || []);
+  const tags = state.tags
+    .filter((tag) => tag.category === "émotion" || tag.category === "contexte")
+    .map(
+      (tag) =>
+        `<button class="chip ann-tag${selected.has(tag.name) ? " active" : ""}" type="button" data-ann-tag="${esc(tag.name)}" aria-pressed="${selected.has(tag.name)}" style="--tag:${tag.color}"><i class="dot"></i>${esc(tag.name)}</button>`
+    )
+    .join("");
+  return `<form class="annotation-form" id="annotationForm">
+    ${annSlider("valence", "Valence", annotation.valence ?? effect.valence)}
+    ${annSlider("arousal", "Arousal", annotation.arousal ?? effect.arousal)}
+    ${annSlider("tension", "Tension", annotation.tension ?? effect.tension)}
+    <div class="chips ann-tags">${tags}</div>
+    <textarea id="annNote" rows="2" placeholder="Note d’écoute, plan prévu, réserve…">${esc(annotation.note || "")}</textarea>
+    <div class="form-actions">
+      <button class="btn small primary" type="submit">${icon("check")} Enregistrer</button>
+      ${annotation.updated_at ? `<button class="btn small ghost" type="button" data-clear-annotation>Effacer</button>` : ""}
+    </div>
+  </form>`;
 }
 
 function annSlider(key, label, value) {
   const v = Math.max(-1, Math.min(1, Number(value) || 0));
-  return `<label class="ann-slider"><span>${esc(label)}</span><input type="range" id="ann-${key}" min="-1" max="1" step="0.01" value="${v.toFixed(2)}"><output for="ann-${key}">${fmtSigned(v)}</output></label>`;
+  return `<label class="ann-slider"><span>${label}</span><input type="range" id="ann-${key}" min="-1" max="1" step="0.01" value="${v.toFixed(2)}"><output>${fmtSigned(v)}</output></label>`;
 }
 
-function renderPlayer() {
-  const track = selectedTrack();
-  const current = currentTrack();
-  const shown = current || track;
-  $("#playerTitle").textContent = shown ? shown.title : "Aucune piste sélectionnée";
-  $("#playerArtist").textContent = shown ? `${shown.artist} · ${FAMILY_SHORT[shown.family] || shown.family}` : "Sélectionnez une piste pour commencer";
-  const favorite = shown ? state.favorites.has(shown.id) : false;
-  $("#favPlayerBtn").setAttribute("aria-pressed", favorite);
-  $("#favPlayerBtn").style.color = favorite ? "var(--accent-2)" : "";
-  $("#favPlayerBtn").querySelector(".icon").style.fill = favorite ? "currentColor" : "none";
-  $("#playBtn").disabled = !shown;
-  const playing = current && !audio.paused;
-  $("#playBtn").innerHTML = icon(playing ? "pause" : "play");
-  $("#loopBtn").setAttribute("aria-pressed", state.loop);
-  $("#loopBtn").classList.toggle("active", state.loop);
-  if (!current) {
-    $("#timeCurrent").textContent = "0:00";
-    $("#timeTotal").textContent = shown ? fmtDur(shown.duration) : "0:00";
-    $("#seek").value = 0;
-  }
+function gauge(label, value, legend, color) {
+  const v = Math.max(-1, Math.min(1, Number(value) || 0));
+  const width = Math.abs(v) * 50;
+  const left = v >= 0 ? 50 : 50 - width;
+  return `<div class="gauge"><div class="gauge-head"><span>${esc(label)}</span><b>${fmtSigned(v)}</b></div><div class="gauge-track"><span style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%;--g:${color}"></span><i></i></div><div class="gauge-legend">${esc(legend)}</div></div>`;
 }
 
-function renderAll() {
-  renderFilters();
-  renderPresets();
-  if (state.view === "clusters") renderClusterMap();
-  else renderMap();
-  renderList();
-  renderDetail();
-  renderPlayer();
+function barRow(label, value, color) {
+  return `<div class="bar-row"><span>${esc(label)}</span><span class="bar"><i style="width:${(clamp01(value) * 100).toFixed(1)}%;--g:${color}"></i></span><b>${Number(value).toFixed(2)}</b></div>`;
 }
 
-function selectTrack(id, { play = false } = {}) {
-  const track = state.tracks.find((t) => t.id === id);
+function arcHtml(track) {
+  const arc = Array.isArray(track.arc) && track.arc.length ? track.arc : Array(12).fill(0.4);
+  const peak = Number(track.features?.arc_peak_index ?? -1);
+  return `<div class="arc">${arc
+    .map((value, index) => `<i class="${index === peak ? "peak" : ""}" style="height:${(8 + clamp01(value) * 82).toFixed(1)}%"></i>`)
+    .join("")}</div>
+    <div class="arc-meta"><span>intro ${fmtTime(track.intro_end)}</span><span>pic ${fmtTime(track.peak_time)}</span><span>sortie ${fmtTime(track.outro_start)}</span><span>hook ${fmtTime(track.hook_start)}</span></div>`;
+}
+
+function chromaHtml(track) {
+  const chroma = track.features?.chroma_mean || [];
+  const root = Number(track.features?.key_root ?? 0);
+  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const max = Math.max(...chroma, 0.001);
+  return `<div class="chroma">${names
+    .map((name, index) => {
+      const value = Number(chroma[index] || 0);
+      return `<div class="chroma-bar${index === root ? " root" : ""}"><span style="height:${(clamp01(value / max) * 100).toFixed(1)}%"></span><small>${name}</small></div>`;
+    })
+    .join("")}</div>
+    <p class="micro">Tonalité ${esc(track.key || "—")} · confiance ${fmtPct(track.key_confidence)}</p>`;
+}
+
+function scatterHtml(tracks, node) {
+  if (!tracks.length) return "";
+  const width = 360;
+  const height = 240;
+  const pad = 28;
+  const points = tracks
+    .map((track, index) => {
+      const effect = effective(track);
+      const jitter = ((index * 37) % 10) / 400 - 0.0125;
+      const x = pad + clamp01(effect.arousal01 + jitter) * (width - pad * 2);
+      const y = height - pad - clamp01(effect.valence01 - jitter) * (height - pad * 2);
+      const hue = 190 - 190 * effect.tension01;
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.2" fill="hsl(${hue.toFixed(1)} 46% 58%)" opacity=".85"><title>${esc(track.title)}</title></circle>`;
+    })
+    .join("");
+  return `<section class="panel mini-map">
+    <div class="panel-head"><div><h2>Position du groupe</h2><p class="micro">Carte affective du cohorte</p></div></div>
+    <svg class="scatter" viewBox="0 0 ${width} ${height}" role="img" aria-label="Carte valence-arousal des ${tracks.length} pistes de ${esc(node.name)} : ${tracks.length} points, la liste ci-contre donne le détail accessible.">
+      <rect x="${pad}" y="${pad}" width="${width - pad * 2}" height="${height - pad * 2}" fill="none" stroke="var(--line)"/>
+      <line x1="${width / 2}" y1="${pad}" x2="${width / 2}" y2="${height - pad}" stroke="var(--line)"/>
+      <line x1="${pad}" y1="${height / 2}" x2="${width - pad}" y2="${height / 2}" stroke="var(--line)"/>
+      ${points}
+    </svg>
+    <div class="axis-labels"><span>calme</span><span>énergique</span><span>mélancolique</span><span>solaire</span></div>
+    <p class="micro">${tracks.length} pistes · couleur = tension</p>
+  </section>`;
+}
+
+/* ------------------------------ Player ------------------------------ */
+
+function currentTrack() {
+  return state.player.currentId ? state.trackById.get(state.player.currentId) : null;
+}
+
+function playTrack(track, { preview = true } = {}) {
   if (!track) return;
-  state.selectedId = id;
-  renderAll();
-  if (play) {
-    loadTrack(track, true);
-  } else if (!state.currentId) {
-    renderPlayer();
-  }
-}
-
-function loadTrack(track, play = false) {
-  if (!track) return;
-  const same = state.currentId === track.id;
+  const start = Number(track.hook_start) || 0;
+  const same = state.player.currentId === track.id;
+  state.player.preview = preview;
+  state.player.currentId = track.id;
   if (!same) {
-    state.currentId = track.id;
-    state.pendingPlay = play;
-    state.pendingSeek = Number(track.hook_start) || 0;
-    state.previewStop = null;
     audio.src = track.audio_url;
     audio.load();
-  } else {
-    state.pendingPlay = play;
-    if (play) {
-      const start = Number(track.hook_start) || 0;
-      if (audio.readyState >= 1) audio.currentTime = start;
-      audio.play().catch(() => {});
-    }
+    audio.dataset.seek = String(start);
+  } else if (audio.readyState >= 1) {
+    audio.currentTime = start;
   }
-  renderPlayer();
-  updateNowPlayingTrack(track);
+  const play = () => audio.play().catch(() => {});
+  if (same) play();
+  updateNowPlaying(track);
+  updatePreviewBadge();
 }
 
-function updateNowPlayingTrack(track) {
-  $("#playerTitle").textContent = track.title;
-  $("#playerArtist").textContent = `${track.artist} · ${FAMILY_SHORT[track.family] || track.family}`;
-  $("#timeTotal").textContent = fmtDur(track.duration);
-  const favorite = state.favorites.has(track.id);
-  $("#favPlayerBtn").setAttribute("aria-pressed", favorite);
-  $("#favPlayerBtn").querySelector(".icon").style.fill = favorite ? "currentColor" : "none";
+function playFull(track) {
+  playTrack(track, { preview: false });
+}
+
+function updateNowPlaying(track) {
+  $("#nowTitle").textContent = track.title;
+  $("#nowArtist").textContent = `${track.artist}${track.cluster_name ? ` · ${track.cluster_name}` : ""}`;
   $("#playBtn").disabled = false;
+  $("#downloadBtn").disabled = false;
+  $("#shortlistBtn").disabled = false;
+  const entry = shortlistEntry(track.id);
+  $("#shortlistBtn").style.color = entry ? "var(--accent-2)" : "";
+  $("#shortlistBtn").querySelector(".icon").style.fill = entry ? "currentColor" : "none";
+  $("#timeTotal").textContent = fmtDur(track.duration);
+}
+
+function updatePreviewBadge() {
+  const badge = $("#previewBadge");
+  const playing = !audio.paused && state.player.preview;
+  badge.hidden = !playing;
 }
 
 function togglePlay() {
-  const track = currentTrack() || selectedTrack();
-  if (!track) return;
-  if (state.currentId !== track.id) {
-    loadTrack(track, true);
+  const track = currentTrack() || state.trackById.get(state.route.trackId);
+  if (!track) {
+    showToast("Choisissez d’abord une piste.");
     return;
   }
-  if (audio.paused) {
-    if (!audio.currentTime) audio.currentTime = Number(track.hook_start) || 0;
-    audio.play().catch(() => {});
-  } else {
-    audio.pause();
+  if (state.player.currentId !== track.id) {
+    playTrack(track, { preview: true });
+    return;
   }
-}
-
-function toggleFavorite(id) {
-  if (!id) return;
-  if (state.favorites.has(id)) state.favorites.delete(id);
-  else state.favorites.add(id);
-  localStorage.setItem("atlas:favorites", JSON.stringify([...state.favorites]));
-  renderMap();
-  renderList();
-  renderDetail();
-  renderPlayer();
-}
-
-function hookEnd(track) {
-  return (Number(track.hook_start) || 0) + (Number(track.hook_duration) || 12);
+  if (audio.paused) audio.play().catch(() => {});
+  else audio.pause();
 }
 
 function updateTimeline() {
   const duration = Number(audio.duration) || 0;
   const current = Number(audio.currentTime) || 0;
   $("#timeCurrent").textContent = fmtTime(current);
-  $("#timeTotal").textContent = fmtTime(duration);
+  $("#timeTotal").textContent = duration ? fmtTime(duration) : "0:00";
   $("#seek").value = duration ? Math.round((current / duration) * 1000) : 0;
   const track = currentTrack();
-  if (state.loop && track && duration) {
-    const end = hookEnd(track);
-    if (current >= end - 0.05) {
-      audio.currentTime = Number(track.hook_start) || 0;
-    }
+  if (!track || !duration) return;
+  const hookStart = Number(track.hook_start) || 0;
+  const hookEnd = hookStart + (Number(track.hook_duration) || 12);
+  if (state.player.loop && current >= hookEnd - 0.05) {
+    audio.currentTime = hookStart;
+    return;
   }
-  if (state.previewStop && current >= state.previewStop) {
+  if (state.player.preview && current >= hookEnd - 0.05) {
     audio.pause();
-    state.previewStop = null;
+    state.player.preview = false;
+    updatePreviewBadge();
   }
 }
 
-function showToast(message, kind = "") {
-  const toast = $("#toast");
-  toast.textContent = message;
-  toast.className = `toast${kind ? ` ${kind}` : ""}`;
-  toast.hidden = false;
-  clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => {
-    toast.hidden = true;
-  }, 3200);
+function downloadTrack(id) {
+  const track = state.trackById.get(id);
+  if (!track) return;
+  showToast(`Préparation de ${track.title}…`);
+  fetch(`/api/download/${encodeURIComponent(id)}`)
+    .then((response) => {
+      if (!response.ok) throw new Error("Téléchargement impossible");
+      const disposition = response.headers.get("content-disposition") || "";
+      const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+      const name = match ? decodeURIComponent(match[1]) : `${track.artist} - ${track.title}.mp3`;
+      return response.blob().then((blob) => ({ blob, name }));
+    })
+    .then(({ blob, name }) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast("Téléchargement lancé.");
+    })
+    .catch((error) => showToast(error.message || "Téléchargement impossible.", "error"));
 }
 
-function openModal(title, html) {
-  $("#modalTitle").textContent = title;
-  $("#modalBody").innerHTML = html;
-  $("#modal").hidden = false;
-  document.body.style.overflow = "hidden";
+/* ------------------------------ Export ------------------------------ */
+
+function selectionRows() {
+  return [...state.shortlist.values()]
+    .sort((a, b) => a.order - b.order)
+    .map((entry) => {
+      const track = state.trackById.get(entry.id);
+      if (!track) return null;
+      return {
+        title: track.title,
+        artist: track.artist,
+        status: STATUS[entry.status],
+        note: entry.note,
+        duration: fmtDur(track.duration),
+        bpm: Math.round(Number(track.bpm) || 0),
+        license: track.license,
+        credit: track.credit,
+        source_url: track.source_url,
+        cluster: clusterPath(track).join(" › "),
+        brief: state.brief ? briefSummary() : "",
+      };
+    })
+    .filter(Boolean);
 }
 
-function closeModal() {
-  $("#modal").hidden = true;
-  document.body.style.overflow = "";
-}
-
-function methodologyHtml() {
-  return `<h3>Ce que fait l’application</h3>
-    <p>Elle estime un <strong>profil affectif perçu</strong> pour chaque piste : valence (mélancolique → solaire), arousal (calme → énergique) et tension (résolution → attente). Ce n’est pas un détecteur d’émotions et encore moins un outil clinique.</p>
-    <h3>Lecture de la carte</h3>
-    <p>L’axe horizontal représente l’arousal, l’axe vertical la valence. La couleur encode la tension, la taille du point la confiance. Les ellipses indiquent l’incertitude : plus elles sont larges, plus le score doit être vérifié à l’écoute.</p>
-    <h3>Scores</h3>
-    <span class="formula">A = tanh(0.95 × (0.24·tempo + 0.16·onsets + 0.13·flux + 0.12·centroïde + 0.10·percussif + 0.08·crest + 0.06·dynamique + 0.05·basses + 0.04·pulse + 0.30·prior de famille))</span>
-    <span class="formula">V = tanh(0.90 × (0.28·mode×confiance + 0.14·harmonie − 0.14·rugosité + 0.10·pulse + 0.08·stabilité − 0.06·flatness + 0.24·prior de famille))</span>
-    <span class="formula">T = tanh(0.85 × (0.30·rugosité + 0.20·entropie harmonique + 0.18·hors-tonalité + 0.12·flux − 0.10·pulse + 0.10·flatness + 0.04·centroïde + 0.20·prior de famille))</span>
-    <p>Les features sont standardisées robustement (médiane/MAD) sur les 20 pistes. Les scores sont donc relatifs à ce corpus. Les poids sont fixés a priori, pas appris sur 20 exemples.</p>
-    <h3>Analyse acoustique</h3>
-    <ul>
-      <li>WAV 48 kHz normalisé à −16 LUFS avant analyse, pour limiter les biais de codec et de mastering.</li>
-      <li>Tempo, onsets, clarté de pulse, RMS, dynamique, crest, centroïde, bande passante, rolloff, flatness, contraste, flux, ZCR.</li>
-      <li>MFCC, chroma, tonnetz, détection de tonalité par profils de Krumhansl + marge de confiance.</li>
-      <li>Rugosité Plomp-Levelt/Sethares sur les pics spectraux, ratio harmonique/percussif, largeur stéréo.</li>
-      <li>Arc temporel en 12 segments, hook de 12 s, points de coupe sur les temps, loopabilité.</li>
-    </ul>
-    <h3>Confiance et limites</h3>
-    <ul>
-      <li>La valence est moins fiable que l’arousal, surtout sur les drones, le didgeridoo et les textures non tempérées.</li>
-      <li>Le mode majeur/mineur n’est utilisé qu’avec une marge de confiance ; une piste atonale est signalée.</li>
-      <li>Les tags sont multi-étiquettes et doivent être validés par écoute. Les annotations manuelles remplacent les valeurs automatiques sur la carte.</li>
-      <li>Les différences culturelles et individuelles de perception ne sont pas modélisées.</li>
-    </ul>
-    <h3>Références principales</h3>
-    <ul>
-      <li>Russell, J. A. (1980). A circumplex model of affect.</li>
-      <li>Krumhansl, C. L. (1982). Key-finding profiles.</li>
-      <li>Plomp, R. &amp; Levelt, W. J. M. (1965). Tonal consonance and critical bandwidth.</li>
-      <li>Sethares, W. A. (1993). Local consonance and the relationship between timbre and scale.</li>
-      <li>Eerola, T. &amp; Vuoskoski, J. K. (2011). A comparison of the discrete and dimensional models of emotion in music.</li>
-      <li>Zentner, M., Grandjean, D. &amp; Scherer, K. R. (2008). Emotions evoked by the sound of music (GEMS).</li>
-      <li>Huron, D. (2006). Sweet Anticipation.</li>
-    </ul>
-    <p class="micro">Le détail des features et des décisions est dans <code>METHODOLOGY.md</code>. Les crédits complets sont dans <code>CREDITS.md</code>.</p>`;
-}
-
-function creditsHtml() {
-  return `<h3>Crédits et licences</h3>
-    <p>Conserver ces crédits avec les MP3. Vérifier chaque licence avant publication monétisée : Content ID peut revendiquer une piste même sous licence libre.</p>
-    <div class="credit-list">${state.tracks
-      .map(
-        (t) => `<div class="credit-item"><strong>${esc(t.title)} — ${esc(t.artist)}</strong><span>${esc(t.license)} · crédit : ${esc(t.credit)}</span><span><a href="${esc(t.source_url)}" target="_blank" rel="noopener">Source YouTube</a>${t.license_url ? ` · <a href="${esc(t.license_url)}" target="_blank" rel="noopener">Licence</a>` : ""}</span></div>`
-      )
-      .join("")}</div>`;
-}
-
-async function exportBase(format) {
-  $("#exportMenu").hidden = true;
-  $("#exportBtn").setAttribute("aria-expanded", "false");
-  const specs = {
-    sqlite: { name: "atlas-musical.sqlite", mime: "application/octet-stream", desc: "Base SQLite" },
-    json: { name: "atlas-musical.json", mime: "application/json", desc: "Snapshot JSON" },
-    zip: { name: "atlas-musical.zip", mime: "application/zip", desc: "Archive complète" },
-  };
-  const spec = specs[format];
-  if (!spec) return;
-  showToast(`Préparation de ${spec.desc.toLowerCase()}…`);
-  try {
-    if ("showSaveFilePicker" in window) {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: spec.name,
-        types: [{ description: spec.desc, accept: { [spec.mime]: [`.${spec.name.split(".").pop()}`] } }],
-      });
-      const response = await fetch(`/api/export?format=${format}`);
-      if (!response.ok) throw new Error(`Export impossible (${response.status})`);
-      const writable = await handle.createWritable();
-      await writable.write(await response.blob());
-      await writable.close();
-      showToast("Base enregistrée.");
-      return;
-    }
-    const link = document.createElement("a");
-    link.href = `/api/export?format=${format}`;
-    link.download = spec.name;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    showToast("Téléchargement lancé.");
-  } catch (error) {
-    if (error && error.name === "AbortError") {
-      showToast("Enregistrement annulé.");
-      return;
-    }
-    showToast(error.message || "Export impossible.", "error");
+function exportSelection(format) {
+  const rows = selectionRows();
+  if (!rows.length) {
+    showToast("La short-list est vide.");
+    return;
+  }
+  if (format === "json") {
+    downloadBlob("atlas-selection.json", JSON.stringify(rows, null, 2), "application/json");
+    return;
+  }
+  if (format === "csv") {
+    const headers = ["title", "artist", "status", "note", "duration", "bpm", "license", "credit", "source_url", "cluster", "brief"];
+    const escapeCsv = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const csv = [headers.join(","), ...rows.map((row) => headers.map((header) => escapeCsv(row[header])).join(","))].join("\n");
+    downloadBlob("atlas-selection.csv", csv, "text/csv");
+    return;
+  }
+  if (format === "md") {
+    const chosen = [...state.shortlist.values()].find((entry) => entry.status === "choisi");
+    const track = chosen ? state.trackById.get(chosen.id) : null;
+    const lines = [
+      "# Décision musicale",
+      "",
+      track ? `**Piste choisie :** ${track.title} — ${track.artist}` : "**Aucune piste choisie**",
+      state.brief ? `**Brief :** ${briefSummary()}` : "",
+      "",
+      "| Piste | Artiste | Statut | Durée | BPM | Licence |",
+      "|---|---|---|---|---|---|",
+      ...rows.map((row) => `| ${row.title} | ${row.artist} | ${row.status} | ${row.duration} | ${row.bpm} | ${row.license} |`),
+      "",
+      "## Crédits",
+      "",
+      ...rows.map((row) => `- ${row.title} — ${row.artist} · ${row.license} · ${row.credit} · ${row.source_url}`),
+    ];
+    downloadBlob("atlas-decision.md", lines.join("\n"), "text/markdown");
   }
 }
 
-function filenameFromDisposition(disposition, fallback) {
-  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition || "");
-  if (utf8) {
-    try {
-      return decodeURIComponent(utf8[1]);
-    } catch {
-      return fallback;
-    }
-  }
-  const plain = /filename="?([^";]+)"?/i.exec(disposition || "");
-  return plain ? plain[1] : fallback;
+function downloadBlob(name, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast("Export lancé.");
 }
 
-async function downloadTrack(trackId) {
-  const track = state.tracks.find((t) => t.id === trackId);
-  showToast(`Préparation de ${track ? track.title : "la piste"}…`);
-  try {
-    const response = await fetch(`/api/download/${encodeURIComponent(trackId)}`);
-    if (!response.ok) throw new Error(`Téléchargement impossible (${response.status})`);
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filenameFromDisposition(response.headers.get("content-disposition"), `${trackId}.mp3`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast("Téléchargement lancé.");
-  } catch (error) {
-    showToast(error.message || "Téléchargement impossible.", "error");
-  }
+function copyText(text) {
+  navigator.clipboard
+    ?.writeText(text)
+    .then(() => showToast("Copié."))
+    .catch(() => showToast("Copie impossible.", "error"));
 }
+
+function copyCredits() {
+  const rows = selectionRows();
+  if (!rows.length) {
+    showToast("La short-list est vide.");
+    return;
+  }
+  copyText(rows.map((row) => `${row.title} — ${row.artist} · ${row.license} · ${row.credit} · ${row.source_url}`).join("\n"));
+}
+
+/* ------------------------------ Dialog / theme ------------------------------ */
 
 function applyTheme(theme) {
   const root = document.documentElement;
@@ -1068,412 +1559,294 @@ function applyTheme(theme) {
     if (value) root.style.setProperty(key, value);
   }
   root.dataset.theme = theme.mode || "dark";
-  $("#themeBadge").textContent = `thème ${theme.theme || "local"}`;
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta && theme.background) meta.setAttribute("content", theme.background);
 }
 
+function openDialog(title, html) {
+  $("#dialogTitle").textContent = title;
+  $("#dialogBody").innerHTML = html;
+  const dialog = $("#appDialog");
+  if (!dialog.open) dialog.showModal();
+  $("#dialogClose").focus();
+}
+
+function helpHtml() {
+  return `<h3>Le parcours en 5 étapes</h3>
+    <ol class="help-list">
+      <li><strong>Brief</strong> — optionnel : type de plan, durée, ton, boucle.</li>
+      <li><strong>Explorer</strong> — choisissez un grand groupe.</li>
+      <li><strong>Affiner</strong> — descendez dans les sous-groupes puis les pistes.</li>
+      <li><strong>Short-list</strong> — écoutez 12 s, statuez, comparez 2-3 pistes.</li>
+      <li><strong>Décider</strong> — analysez, choisissez, exportez le crédit.</li>
+    </ol>
+    <h3>Ce que veulent dire les chiffres</h3>
+    <p>Valence : mélancolique → solaire. Arousal : calme → énergique. Tension : résolution → attente. Ces scores sont relatifs au corpus et estimés, pas mesurés cliniquement.</p>
+    <h3>Raccourcis</h3>
+    <p><kbd>/</kbd> recherche · <kbd>Espace</kbd> lecture/pause hors champ de saisie · <kbd>Échap</kbd> ferme les menus.</p>`;
+}
+
+function methodologyHtml() {
+  return `<h3>Comment les groupes sont construits</h3>
+    <p>Les pistes sont décrites par 24 features audio et trois axes affectifs. Les tags ne servent pas au clustering : ils servent à nommer les groupes. Une ACP réduit l’espace, puis Ward construit une hiérarchie de groupes et sous-groupes. La stabilité est estimée par bootstrap.</p>
+    <h3>Comment lire les scores</h3>
+    <p>Valence, arousal et tension sont des estimations relatives au corpus, avec une confiance. Elles ne mesurent pas une émotion ressentie. Les annotations manuelles remplacent les valeurs automatiques.</p>
+    <h3>Licences</h3>
+    <p>Chaque piste affiche sa licence, son crédit et sa source. Vérifiez-les avant publication : Content ID peut revendiquer une piste même sous licence libre.</p>`;
+}
+
+function creditsHtml() {
+  return `<h3>Crédits</h3>
+    <p>Les crédits complets sont générés localement dans <code>CREDITS.md</code>. Chaque fiche piste affiche son crédit et sa licence ; le bouton « Copier le crédit » prépare la ligne à coller dans une description.</p>
+    <p>La short-list peut être exportée en JSON, CSV ou fiche de décision Markdown avec les crédits.</p>`;
+}
+
+/* ------------------------------ Events ------------------------------ */
+
 function bindEvents() {
-  $("#searchInput").addEventListener("input", (event) => {
-    state.filters.q = event.target.value.trim().toLowerCase();
-    renderFilters();
-    renderMap();
-    renderList();
-  });
-
-  $("#viewTabs").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-view]");
-    if (button) setView(button.dataset.view);
-  });
-
-  $("#clusterFilters").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-cluster-filter]");
-    if (button) toggleClusterFilter(button.dataset.clusterFilter);
-  });
-
-  $("#familyFilters").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-family]");
-    if (!button) return;
-    const family = button.dataset.family;
-    if (state.filters.families.has(family)) state.filters.families.delete(family);
-    else state.filters.families.add(family);
-    renderFilters();
-    renderMap();
-    renderList();
-  });
-
-  $("#tagFilters").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-tag]");
-    if (!button) return;
-    const tag = button.dataset.tag;
-    if (state.filters.tags.has(tag)) state.filters.tags.delete(tag);
-    else state.filters.tags.add(tag);
-    renderFilters();
-    renderMap();
-    renderList();
-  });
-
-  $("#presets").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-preset]");
-    if (!button) return;
-    state.preset = button.dataset.preset;
-    state.sort = "relevance";
-    $("#sortSelect").value = "relevance";
-    renderPresets();
-    renderFilters();
-    renderMap();
-    renderList();
-  });
-
-  $("#sortSelect").addEventListener("change", (event) => {
-    state.sort = event.target.value;
-    renderList();
-  });
-
-  const numberFilter = (id, key) => {
-    $(`#${id}`).addEventListener("input", (event) => {
-      const value = Number(event.target.value);
-      state.filters[key] = Number.isFinite(value) ? value : state.filters[key];
-      renderFilters();
-      renderMap();
-      renderList();
-    });
-  };
-  numberFilter("bpmMin", "bpmMin");
-  numberFilter("bpmMax", "bpmMax");
-  numberFilter("durMin", "durMin");
-  numberFilter("durMax", "durMax");
-
-  $("#confMin").addEventListener("input", (event) => {
-    state.filters.confMin = Number(event.target.value);
-    renderFilters();
-    renderMap();
-    renderList();
-  });
-
-  $("#favoritesOnly").addEventListener("change", (event) => {
-    state.filters.favoritesOnly = event.target.checked;
-    renderFilters();
-    renderMap();
-    renderList();
-  });
-
-  $("#resetFilters").addEventListener("click", () => {
-    state.filters = { q: "", families: new Set(), tags: new Set(), clusters: new Set(), bpmMin: 0, bpmMax: 240, durMin: 0, durMax: 20, confMin: 0, favoritesOnly: false };
-    state.preset = "Tout";
-    state.sort = "relevance";
-    $("#searchInput").value = "";
-    $("#sortSelect").value = "relevance";
-    renderPresets();
-    renderAll();
-  });
-
-  $("#trackList").addEventListener("click", (event) => {
-    const play = event.target.closest("[data-play]");
-    if (play) {
-      event.stopPropagation();
-      selectTrack(play.dataset.play, { play: true });
-      return;
+  $("#flowNav").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-nav]");
+    if (!button || button.disabled) return;
+    const nav = button.dataset.nav;
+    if (nav === "brief") navigate("brief");
+    else if (nav === "groups") navigate("groups");
+    else if (nav === "group") {
+      const id = state.route.groupId || state.trackById.get(state.route.trackId)?.cluster || state.lastGroupId;
+      if (id) navigate(`group/${id}`);
     }
-    const download = event.target.closest("[data-download]");
-    if (download) {
-      event.stopPropagation();
-      downloadTrack(download.dataset.download);
-      return;
-    }
-    const fav = event.target.closest("[data-fav]");
-    if (fav) {
-      event.stopPropagation();
-      toggleFavorite(fav.dataset.fav);
-      return;
-    }
-    const row = event.target.closest("[data-id]");
-    if (row) selectTrack(row.dataset.id, { play: true });
-  });
-
-  $("#trackList").addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    if (event.target.closest("button")) return;
-    const row = event.target.closest(".track-row");
-    if (!row) return;
-    event.preventDefault();
-    selectTrack(row.dataset.id, { play: true });
-  });
-
-  $("#detailContent").addEventListener("click", (event) => {
-    const action = event.target.closest("[data-action]");
-    if (action) {
-      const track = selectedTrack();
-      if (!track) return;
-      if (action.dataset.action === "play-hook") {
-        loadTrack(track, true);
-        const start = Number(track.hook_start) || 0;
-        state.pendingSeek = start;
-        if (audio.readyState >= 1) audio.currentTime = start;
-      }
-      if (action.dataset.action === "fav") toggleFavorite(track.id);
-      if (action.dataset.action === "clear-annotation") clearAnnotation(track);
-      return;
-    }
-    const clusterLink = event.target.closest("[data-cluster-link]");
-    if (clusterLink) {
-      state.filters.clusters = new Set([clusterLink.dataset.clusterLink]);
-      setView("clusters");
-      renderFilters();
-      renderList();
-      return;
-    }
-    const cut = event.target.closest("[data-time]");
-    if (cut) {
-      const track = selectedTrack();
-      if (!track) return;
-      if (state.currentId !== track.id) loadTrack(track, false);
-      state.pendingSeek = Number(cut.dataset.time);
-      if (audio.readyState >= 1) audio.currentTime = Number(cut.dataset.time);
-      audio.play().catch(() => {});
-      return;
-    }
-    const similar = event.target.closest("[data-similar]");
-    if (similar) selectTrack(similar.dataset.similar, { play: true });
-    const annTag = event.target.closest("[data-ann-tag]");
-    if (annTag) {
-      annTag.classList.toggle("active");
-      annTag.setAttribute("aria-pressed", annTag.classList.contains("active"));
-    }
-  });
-
-  $("#detailContent").addEventListener("input", (event) => {
-    if (event.target.matches(".ann-slider input")) {
-      const output = event.target.parentElement.querySelector("output");
-      if (output) output.textContent = fmtSigned(event.target.value);
-    }
-  });
-
-  $("#detailContent").addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (event.target.id === "annotationForm") saveAnnotation(event.target);
+    else if (nav === "shortlist") navigate("shortlist");
+    else if (nav === "track") navigate(state.route.trackId ? `track/${state.route.trackId}` : "shortlist");
   });
 
   $("#playBtn").addEventListener("click", togglePlay);
-  $("#favPlayerBtn").addEventListener("click", () => toggleFavorite(state.currentId || state.selectedId));
-  $("#loopBtn").addEventListener("click", () => {
-    state.loop = !state.loop;
-    const track = currentTrack() || selectedTrack();
-    if (state.loop && track) {
-      const start = Number(track.hook_start) || 0;
-      if (audio.readyState >= 1 && (audio.currentTime < start || audio.currentTime > hookEnd(track))) {
-        audio.currentTime = start;
-      }
-    }
-    renderPlayer();
-  });
-
   $("#seek").addEventListener("input", (event) => {
     const duration = Number(audio.duration) || 0;
-    if (!duration) return;
-    audio.currentTime = (Number(event.target.value) / 1000) * duration;
+    if (duration) audio.currentTime = (Number(event.target.value) / 1000) * duration;
   });
-
   $("#volume").addEventListener("input", (event) => {
     audio.volume = Number(event.target.value) / 100;
-    localStorage.setItem("atlas:volume", String(audio.volume));
+    writeJSON(STORAGE.volume, audio.volume);
+  });
+  $("#loopBtn").addEventListener("click", () => {
+    state.player.loop = !state.player.loop;
+    $("#loopBtn").classList.toggle("active", state.player.loop);
+    $("#loopBtn").setAttribute("aria-pressed", String(state.player.loop));
+  });
+  $("#downloadBtn").addEventListener("click", () => {
+    const track = currentTrack();
+    if (track) downloadTrack(track.id);
+  });
+  $("#shortlistBtn").addEventListener("click", () => {
+    const track = currentTrack();
+    if (track) {
+      addToShortlist(track.id);
+      updateNowPlaying(track);
+    }
   });
 
   audio.addEventListener("loadedmetadata", () => {
-    const track = currentTrack();
-    if (track) {
-      $("#timeTotal").textContent = fmtTime(audio.duration);
-      if (state.pendingSeek !== null) {
-        audio.currentTime = Math.min(state.pendingSeek, Math.max(0, audio.duration - 0.1));
-        state.pendingSeek = null;
-      }
-    }
-    if (state.pendingPlay) {
-      state.pendingPlay = false;
-      audio.play().catch(() => {});
-    }
-    renderPlayer();
+    const seek = Number(audio.dataset.seek || 0);
+    if (seek) audio.currentTime = Math.min(seek, Math.max(0, audio.duration - 0.1));
+    audio.dataset.seek = "";
+    audio.play().catch(() => {});
   });
   audio.addEventListener("timeupdate", updateTimeline);
-  audio.addEventListener("play", renderPlayer);
-  audio.addEventListener("pause", renderPlayer);
+  audio.addEventListener("play", () => {
+    $("#playBtn").innerHTML = icon("pause");
+    $("#playBtn").setAttribute("aria-label", "Pause");
+    updatePreviewBadge();
+  });
+  audio.addEventListener("pause", () => {
+    $("#playBtn").innerHTML = icon("play");
+    $("#playBtn").setAttribute("aria-label", "Lecture");
+    updatePreviewBadge();
+  });
   audio.addEventListener("ended", () => {
-    state.loop = false;
-    renderPlayer();
+    state.player.preview = false;
+    updatePreviewBadge();
   });
   audio.addEventListener("error", () => showToast("Lecture audio impossible.", "error"));
 
-  $("#exportBtn").addEventListener("click", (event) => {
+  $("#menuBtn").addEventListener("click", (event) => {
     event.stopPropagation();
-    const menu = $("#exportMenu");
+    const menu = $("#moreMenu");
     menu.hidden = !menu.hidden;
-    $("#exportBtn").setAttribute("aria-expanded", String(!menu.hidden));
-  });
-  $("#exportMenu").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-format]");
-    if (button) exportBase(button.dataset.format);
+    $("#menuBtn").setAttribute("aria-expanded", String(!menu.hidden));
   });
   document.addEventListener("click", () => {
-    $("#exportMenu").hidden = true;
-    $("#exportBtn").setAttribute("aria-expanded", "false");
+    $("#moreMenu").hidden = true;
+    $("#menuBtn").setAttribute("aria-expanded", "false");
   });
-
-  $("#methodologyBtn").addEventListener("click", () => openModal("Méthodologie", methodologyHtml()));
-  $("#creditsBtn").addEventListener("click", () => openModal("Crédits", creditsHtml()));
-  $("#modal").addEventListener("click", (event) => {
-    if (event.target.closest("[data-close-modal]")) closeModal();
-  });
-
-  mapWrap.addEventListener("mousemove", (event) => {
-    const rect = svg.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * MAP.width;
-    const y = ((event.clientY - rect.top) / rect.height) * MAP.height;
-    if (x < MAP.pad || x > MAP.width - MAP.pad || y < MAP.pad || y > MAP.height - MAP.pad) {
-      $("#mapCrosshair").hidden = true;
+  $("#moreMenu").addEventListener("click", (event) => {
+    event.stopPropagation();
+    const format = event.target.closest("[data-format]");
+    if (format) {
+      exportSelection(format.dataset.format);
+      $("#moreMenu").hidden = true;
       return;
     }
-    $("#mapCrosshair").hidden = false;
-    $("#crossX").setAttribute("x1", x);
-    $("#crossX").setAttribute("x2", x);
-    $("#crossY").setAttribute("y1", y);
-    $("#crossY").setAttribute("y2", y);
-    let nearest = null;
-    let best = Infinity;
-    for (const pos of state.mapPositions.values()) {
-      const d = Math.hypot(pos.x - x, pos.y - y);
-      if (d < best) {
-        best = d;
-        nearest = pos.track;
-      }
-    }
-    const px = Math.round(((x - MAP.pad) / (MAP.width - MAP.pad * 2)) * 100);
-    const py = Math.round(((MAP.height - MAP.pad - y) / (MAP.height - MAP.pad * 2)) * 100);
-    $("#mapReadout").textContent = nearest
-      ? `curseur ${px}% · ${py}% — plus proche : ${nearest.title} (${Math.round(best)} px)`
-      : `curseur ${px}% · ${py}%`;
+    const action = event.target.closest("[data-action]");
+    if (!action) return;
+    $("#moreMenu").hidden = true;
+    if (action.dataset.action === "copy-credits") copyCredits();
+    else if (action.dataset.action === "methodology") openDialog("Méthodologie", methodologyHtml());
+    else if (action.dataset.action === "credits") openDialog("Crédits", creditsHtml());
+    else if (action.dataset.action === "export-base-json") window.location.href = "/api/export?format=json";
+    else if (action.dataset.action === "export-base-sqlite") window.location.href = "/api/export?format=sqlite";
   });
-  mapWrap.addEventListener("mouseleave", () => {
-    $("#mapCrosshair").hidden = true;
-    $("#mapReadout").textContent = "Survolez la carte pour lire une position.";
+
+  $("#helpBtn").addEventListener("click", () => openDialog("Aide", helpHtml()));
+  $("#dialogClose").addEventListener("click", () => $("#appDialog").close());
+  $("#appDialog").addEventListener("click", (event) => {
+    if (event.target === $("#appDialog")) $("#appDialog").close();
+  });
+
+  $("#view").addEventListener("click", (event) => {
+    const exportButton = event.target.closest("[data-export]");
+    if (exportButton) {
+      exportSelection(exportButton.dataset.export);
+      return;
+    }
+    const action = event.target.closest("[data-action]");
+    if (action?.dataset.action === "copy-credits") {
+      copyCredits();
+      return;
+    }
+    const copy = event.target.closest("[data-copy-credit]");
+    if (copy) {
+      const track = state.trackById.get(copy.dataset.copyCredit);
+      if (track) copyText(`${track.title} — ${track.artist} · ${track.license} · ${track.credit} · ${track.source_url}`);
+      return;
+    }
+    const group = event.target.closest("[data-group]");
+    if (group) {
+      navigate(`group/${encodeURIComponent(group.dataset.group)}`);
+      return;
+    }
+    const clearCompare = event.target.closest("[data-compare-clear]");
+    if (clearCompare) {
+      state.compare = [];
+      refreshView();
+      return;
+    }
+    const playCompare = event.target.closest("[data-play-compare]");
+    if (playCompare) {
+      playCompareSequence();
+      return;
+    }
+    const add = event.target.closest("[data-add]");
+    if (add) {
+      event.preventDefault();
+      addToShortlist(add.dataset.add);
+      updateAddButtons(add.dataset.add);
+      return;
+    }
+    const choose = event.target.closest("[data-choose]");
+    if (choose) {
+      chooseTrack(choose.dataset.choose);
+      refreshView();
+      return;
+    }
+    const toggle = event.target.closest("[data-toggle-tracks]");
+    if (toggle) {
+      state.showTracks = !state.showTracks;
+      refreshView();
+    }
   });
 
   document.addEventListener("keydown", (event) => {
     const tag = (event.target.tagName || "").toLowerCase();
     const typing = tag === "input" || tag === "textarea" || tag === "select";
+    const interactive = event.target.closest("button, a, input, textarea, select, summary");
     if (event.key === "/" && !typing) {
       event.preventDefault();
-      $("#searchInput").focus();
+      const input = $("#searchInput");
+      if (input) input.focus();
     } else if (event.key === "Escape") {
-      closeModal();
-      $("#exportMenu").hidden = true;
-      hideTooltip();
-      hideClusterTooltip();
-      $("#searchInput").blur();
-    } else if (event.code === "Space" && !typing) {
+      $("#moreMenu").hidden = true;
+      if ($("#appDialog").open) $("#appDialog").close();
+    } else if (event.code === "Space" && !typing && !interactive) {
       event.preventDefault();
       togglePlay();
-    } else if (!typing && event.key.toLowerCase() === "f") {
-      toggleFavorite(state.currentId || state.selectedId);
-    } else if (!typing && event.key.toLowerCase() === "l") {
-      $("#loopBtn").click();
     }
   });
+
+  window.addEventListener("hashchange", () => renderRoute(true));
 }
 
-async function saveAnnotation(form) {
-  const track = selectedTrack();
-  if (!track) return;
-  const tags = $$(".ann-tags .chip.active", form).map((node) => node.dataset.annTag);
-  const payload = {
-    track_id: track.id,
-    valence: Number($("#ann-valence", form).value),
-    arousal: Number($("#ann-arousal", form).value),
-    tension: Number($("#ann-tension", form).value),
-    tags,
-    note: $("#annNote", form).value.trim(),
-  };
-  try {
-    const response = await fetch("/api/annotations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) throw new Error(`Enregistrement impossible (${response.status})`);
-    const data = await response.json();
-    track.annotation = {
-      valence: payload.valence,
-      arousal: payload.arousal,
-      tension: payload.tension,
-      tags: payload.tags,
-      note: payload.note,
-      updated_at: data.updated_at,
+function playCompareSequence() {
+  const tracks = state.compare.map((id) => state.trackById.get(id)).filter(Boolean);
+  if (tracks.length < 2) return;
+  let index = 0;
+  const playNext = () => {
+    if (index >= tracks.length) return;
+    const track = tracks[index];
+    index += 1;
+    playTrack(track, { preview: true });
+    const start = Number(track.hook_start) || 0;
+    const stop = start + 6;
+    const check = () => {
+      if (!state.player.currentId || state.player.currentId !== track.id) return;
+      if (audio.currentTime >= stop) {
+        audio.pause();
+        audio.removeEventListener("timeupdate", check);
+        setTimeout(playNext, 250);
+      }
     };
-    renderAll();
-    showToast("Annotation enregistrée.");
-  } catch (error) {
-    showToast(error.message || "Annotation impossible.", "error");
-  }
+    audio.addEventListener("timeupdate", check);
+  };
+  playNext();
 }
 
-async function clearAnnotation(track) {
-  try {
-    const response = await fetch(`/api/annotations/${encodeURIComponent(track.id)}`, { method: "DELETE" });
-    if (!response.ok) throw new Error("Suppression impossible");
-    track.annotation = null;
-    renderAll();
-    showToast("Annotation effacée.");
-  } catch (error) {
-    showToast(error.message || "Suppression impossible.", "error");
-  }
+/* ------------------------------ Init ------------------------------ */
+
+function showToast(message, kind = "") {
+  const toast = $("#toast");
+  toast.textContent = message;
+  toast.className = `toast${kind ? ` ${kind}` : ""}`;
+  toast.hidden = false;
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => {
+    toast.hidden = true;
+  }, 3200);
 }
 
-function loadFavorites() {
-  try {
-    const raw = JSON.parse(localStorage.getItem("atlas:favorites") || "[]");
-    state.favorites = new Set(Array.isArray(raw) ? raw : []);
-  } catch {
-    state.favorites = new Set();
-  }
-  const volume = Number(localStorage.getItem("atlas:volume") || 0.8);
-  audio.volume = Math.max(0, Math.min(1, volume));
-  $("#volume").value = Math.round(audio.volume * 100);
+function renderFatal(error) {
+  $("#view").innerHTML = `<div class="page"><div class="empty big">
+    <h1>Bibliothèque indisponible</h1>
+    <p>${esc(error.message || "Erreur inconnue.")}</p>
+    <p class="micro">Lancez <code>python -m analysis.analyze</code> puis rechargez.</p>
+    <button class="btn primary" type="button" onclick="location.reload()">Réessayer</button>
+  </div></div>`;
 }
 
 async function init() {
-  loadFavorites();
-  buildMapBase();
   bindEvents();
+  state.shortlist = loadShortlist();
+  updateShortlistCount();
+  const volume = Number(readJSON(STORAGE.volume, 0.8));
+  audio.volume = Math.max(0, Math.min(1, volume));
+  $("#volume").value = Math.round(audio.volume * 100);
+
   try {
-    const [libResponse, themeResponse] = await Promise.all([fetch("/api/library"), fetch("/api/theme")]);
-    if (!libResponse.ok) throw new Error("Bibliothèque indisponible. Lancer analysis/analyze.py.");
-    state.library = await libResponse.json();
-    state.tracks = state.library.tracks || [];
-    state.tags = state.library.tags || [];
-    state.families = Array.from(new Set(state.tracks.map((t) => t.family))).sort();
-    state.clusters = state.library.clusters || null;
-    state.clusterById = new Map((state.clusters?.clusters || []).map((cluster) => [cluster.id, cluster]));
+    const [libraryResponse, themeResponse] = await Promise.all([
+      fetch("/api/library"),
+      fetch("/api/theme"),
+    ]);
+    if (!libraryResponse.ok) throw new Error("Bibliothèque indisponible. Lancer analysis/analyze.py.");
+    const library = await libraryResponse.json();
+    state.library = library;
+    state.tracks = library.tracks || [];
+    state.tags = library.tags || [];
+    state.usages = library.usages || [];
+    state.tagMap = new Map(state.tags.map((tag) => [tag.name, tag]));
+    state.trackById = new Map(state.tracks.map((track) => [track.id, track]));
+    state.clusters = library.clusters || null;
+    const nodes = state.clusters?.nodes || state.clusters?.clusters || [];
+    state.nodes = new Map(nodes.map((node) => [node.id, node]));
+    state.roots = state.clusters?.roots || (state.clusters?.clusters || []).map((node) => node.id);
     if (themeResponse.ok) applyTheme(await themeResponse.json());
-    const clusterCount = clustersAvailable() ? state.clusters.clusters.length : 0;
-    const clusterTab = $('#viewTabs [data-view="clusters"]');
-    if (!clustersAvailable()) {
-      clusterTab.disabled = true;
-      clusterTab.title = "Clusters indisponibles : lancer python -m analysis.cluster";
-    }
-    $("#subtitle").textContent = `${state.tracks.length} pistes · ${state.tags.length} tags · ${clusterCount} clusters · modèle ${state.library.meta.model_version}`;
-    const hashMatch = window.location.hash.match(/^#clusters(?:=([A-Za-z0-9_-]+))?$/);
-    if (hashMatch && clustersAvailable()) {
-      state.view = "clusters";
-      if (hashMatch[1] && state.clusterById.has(hashMatch[1])) {
-        state.filters.clusters.add(hashMatch[1]);
-      }
-    }
-    if (state.tracks.length) state.selectedId = state.tracks[0].id;
-    renderAll();
-    setView(state.view);
+    renderRoute(true);
   } catch (error) {
-    $("#subtitle").textContent = "Erreur de chargement";
-    $("#trackList").innerHTML = `<div class="track-empty">${esc(error.message || "Bibliothèque indisponible.")}</div>`;
-    showToast(error.message || "Bibliothèque indisponible.", "error");
+    renderFatal(error);
   }
 }
 

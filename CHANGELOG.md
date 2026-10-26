@@ -7,6 +7,9 @@ Toutes les dates sont au format AAAA-MM-JJ.
 ### Ajouté
 
 - Clusters de similarité hiérarchiques : espace audio + affect, ACP, Ward multi-niveaux, stabilité bootstrap et nommage par tags dominants.
+- Nouveau parcours linéaire en 5 étapes : brief, treemap de groupes, drill-down, short-list, décision.
+- Short-list avec statuts, notes, comparaison 2-3 pistes et export JSON/CSV/Markdown avec crédits.
+- Séparation inspecter/écouter, preview borné à 12 s, A/B séquentiel et lecteur simplifié.
 - Filtre, tri et fiche détaillée par cluster ; endpoint `GET /api/clusters`.
 - Bouton de téléchargement MP3 sur chaque piste de la liste.
 - Endpoint `GET /api/download/{id}` avec nom de fichier lisible `Artiste - Titre.mp3`.

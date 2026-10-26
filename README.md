@@ -4,21 +4,27 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](pyproject.toml)
 
-> Carte affective locale pour explorer, filtrer et annoter une bibliothèque de musiques instrumentales.
+> Assistant local de décision musicale : de nombreuses pistes à une musique choisie, créditée et exportable.
 
-**EN —** Atlas Musical is a local-first web app that maps instrumental tracks on a valence/arousal plane, with tension, confidence, tags, cue points and manual annotations. Audio and generated library data are intentionally not part of this repository.
+**EN —** Atlas Musical is a local-first decision assistant that narrows an instrumental library through hierarchical clusters, a five-step flow, a shortlist, A/B comparison and a license-aware export. Audio and generated library data are intentionally not part of this repository.
 
 ## Aperçu
 
-Atlas Musical transforme une collection de pistes en carte interactive pour choisir une ambiance, préparer un montage ou documenter un corpus :
+Atlas Musical organise la recherche musicale en un parcours linéaire, avec une seule question par écran :
 
-- carte valence/arousal, couleur de tension et ellipse de confiance ;
-- clusters de similarité nommés automatiquement et visualisés en bulles, avec filtre et tri dédiés ;
-- filtres par famille, tags, BPM, durée, confiance et favoris ;
-- presets d’usage cinéma (ouverture, transition, paysage, action, portrait, résolution) ;
-- fiche détaillée : tonalité, arc temporel, hook, points de coupe, tags, usages, licence et pistes proches ;
+1. **Brief** (optionnel) : type de plan, durée, ton, boucle, dialogue.
+2. **Explorer** : 4 à 6 grands groupes de similarité, en treemap, classés par compatibilité avec le brief.
+3. **Affiner** : descente dans les sous-groupes puis les familles fines, avec carte affective du cohorte et facettes contextuelles.
+4. **Short-list** : 5 à 15 candidates, statuts (à écouter / retenu / écarté / choisi), notes et comparaison de 2 à 3 pistes.
+5. **Décider** : analyse détaillée, hook de 12 s, points de coupe, licence et crédit, export de la sélection.
+
+Autres fonctions :
+
+- clusters hiérarchiques nommés automatiquement, avec stabilité bootstrap ;
+- carte valence/arousal, tension, confiance, arc temporel, chroma, tags et usages ;
 - annotations manuelles stockées localement dans SQLite ;
-- export SQLite, JSON ou ZIP depuis l’interface ;
+- export de la short-list en JSON, CSV ou fiche de décision Markdown, avec crédits ;
+- export de la base complète en SQLite, JSON ou ZIP ;
 - thème Omarchy optionnel, avec fallback neutre.
 
 L’application ne « détecte » pas les émotions. Elle estime un **profil affectif perçu**, relatif au corpus, avec une confiance explicite. Les détails sont dans [`METHODOLOGY.md`](METHODOLOGY.md).
@@ -81,14 +87,14 @@ Traiter par lots de 50 permet de valider la qualité avant de continuer. `analys
 
 ### Clusters de similarité
 
-L’analyse regroupe aussi les pistes par similarité et écrit `data/clusters.json`. Les groupes sont nommés à partir de leurs tags dominants (par exemple « Littoral », « Nuit/route », « Nostalgie & apaisement ») puis projetés en 2D pour être affichés comme des bulles. Dans l’interface, l’onglet **Clusters de similarité** permet de filtrer la bibliothèque en cliquant une bulle ; le cluster apparaît aussi dans la liste, la fiche détaillée et le tri.
+L’analyse construit une hiérarchie de groupes : l’espace combine 24 descripteurs audio et les axes affectifs, sans utiliser les tags (ils servent au nommage). Une ACP réduit l’espace, Ward construit les niveaux, et la stabilité de chaque nœud est estimée par bootstrap. Le fichier `data/clusters.json` expose `roots`, `nodes`, `paths`, `assignments` et les métriques de stabilité.
 
 ```bash
-python3 -m analysis.cluster              # recalcule les groupes seuls
-python3 -m analysis.cluster --clusters 6 # impose un nombre de groupes
+python3 -m analysis.cluster              # recalcule la hiérarchie seule
+python3 -m analysis.cluster --clusters 5 # impose un nombre de groupes racines
 ```
 
-La méthode (Ward, silhouette, ACP, nommage) est décrite dans [`METHODOLOGY.md`](METHODOLOGY.md). Le fichier `data/clusters.json` est local et ignoré par Git.
+Dans l’interface, le treemap des groupes permet de zoomer de niveau en niveau jusqu’aux pistes. La méthode (ACP, Ward, silhouette, Jaccard bootstrap, nommage) est décrite dans [`METHODOLOGY.md`](METHODOLOGY.md). Le fichier `data/clusters.json` est local et ignoré par Git.
 
 ### Lancer uniquement l’interface et l’API
 
@@ -130,6 +136,7 @@ Les dossiers `audio/`, `data/` et `work/` sont créés à l’exécution et igno
 
 - `GET /api/health`
 - `GET /api/library`
+- `GET /api/clusters`
 - `GET /api/track/{id}`
 - `GET /api/audio/{id}` (Range supporté)
 - `GET /api/download/{id}` (MP3 en pièce jointe)

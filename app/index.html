@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#000000">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
-  <title>Atlas Musical — carte affective</title>
-  <link rel="stylesheet" href="/styles.css?v=5">
+  <title>Atlas Musical — choisir une musique</title>
+  <link rel="stylesheet" href="/styles.css?v=11">
 </head>
 <body>
+  <a class="skip-link" href="#view">Aller au contenu</a>
+
   <svg class="svg-sprite" aria-hidden="true">
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5-10-6.5Z"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></symbol>
@@ -24,271 +26,88 @@
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v6M12 7.5v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h2l1.5-5 2 10L11 7l2 12 2.5-9 2 5H21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M20 12H5m0 0 6-6m-6 6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M4 12h15m0 0-6-6m6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24"><path d="M7 4v16M17 4v16M4 8h6M14 16h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 7h11M9 12h11M9 17h11M4.5 7h.1M4.5 12h.1M4.5 17h.1" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
   </svg>
 
-  <div class="app-shell">
+  <div class="app">
     <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
+      <a class="brand" href="#/groups" aria-label="Atlas Musical — accueil">
+        <span class="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 40 40"><path d="M5 24c4-1 5-8 9-8s5 12 9 12 5-16 9-16 4 8 7 8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="31" cy="9" r="3" fill="currentColor"/></svg>
-        </div>
-        <div>
-          <h1>Atlas Musical</h1>
-          <p id="subtitle">Carte affective pour choisir l’ambiance d’un plan</p>
-        </div>
-      </div>
+        </span>
+        <span class="brand-text"><strong>Atlas Musical</strong><small>de 200 pistes à une décision</small></span>
+      </a>
+
+      <nav class="flow-nav" id="flowNav" aria-label="Étapes du parcours">
+        <button type="button" data-nav="brief"><span>1</span> Brief</button>
+        <button type="button" data-nav="groups"><span>2</span> Explorer</button>
+        <button type="button" data-nav="group"><span>3</span> Affiner</button>
+        <button type="button" data-nav="shortlist"><span>4</span> Short-list <b id="shortlistCount">0</b></button>
+        <button type="button" data-nav="track"><span>5</span> Décider</button>
+      </nav>
+
       <div class="top-actions">
-        <span class="theme-badge" id="themeBadge">thème local</span>
-        <button class="btn ghost" id="methodologyBtn" type="button">
-          <svg class="icon"><use href="#i-info"></use></svg> Méthodologie
-        </button>
-        <button class="btn ghost" id="creditsBtn" type="button">Crédits</button>
-        <div class="export-wrap">
-          <button class="btn primary" id="exportBtn" type="button" aria-haspopup="menu" aria-expanded="false">
-            <svg class="icon"><use href="#i-download"></use></svg> Télécharger la base
-            <svg class="icon chevron"><use href="#i-chevron"></use></svg>
-          </button>
-          <div class="menu" id="exportMenu" role="menu" hidden>
-            <button type="button" role="menuitem" data-format="sqlite">
-              <strong>Base SQLite</strong><span>Bibliothèque complète, annotations incluses</span>
-            </button>
-            <button type="button" role="menuitem" data-format="json">
-              <strong>JSON</strong><span>Snapshot lisible par d’autres outils</span>
-            </button>
-            <button type="button" role="menuitem" data-format="zip">
-              <strong>Archive ZIP</strong><span>MP3 + base + crédits + méthodologie</span>
-            </button>
+        <button class="btn ghost small" type="button" id="helpBtn"><svg class="icon" aria-hidden="true"><use href="#i-info"></use></svg> Aide</button>
+        <div class="menu-wrap">
+          <button class="btn ghost small" type="button" id="menuBtn" aria-haspopup="menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"></use></svg> Plus</button>
+          <div class="menu" id="moreMenu" role="menu" hidden>
+            <button type="button" role="menuitem" data-format="json">Exporter la sélection (JSON)</button>
+            <button type="button" role="menuitem" data-format="csv">Exporter la sélection (CSV)</button>
+            <button type="button" role="menuitem" data-action="copy-credits">Copier les crédits</button>
+            <hr>
+            <button type="button" role="menuitem" data-action="methodology">Méthodologie</button>
+            <button type="button" role="menuitem" data-action="credits">Crédits</button>
+            <button type="button" role="menuitem" data-action="export-base-json">Télécharger la base JSON</button>
+            <button type="button" role="menuitem" data-action="export-base-sqlite">Télécharger la base SQLite</button>
           </div>
         </div>
       </div>
     </header>
 
-    <main class="workspace">
-      <aside class="panel filters" aria-label="Filtres">
-        <div class="panel-head">
-          <div>
-            <h2>Filtres</h2>
-            <p class="micro" id="filterHint">Affiner les pistes</p>
-          </div>
-          <button class="icon-btn" id="resetFilters" type="button" title="Réinitialiser les filtres" aria-label="Réinitialiser les filtres">
-            <svg class="icon"><use href="#i-reset"></use></svg>
-          </button>
+    <main id="view" class="view" tabindex="-1" aria-live="polite"></main>
+
+    <footer class="player" id="player" aria-label="Lecteur audio">
+      <div class="now">
+        <div class="cover" aria-hidden="true"><svg class="icon"><use href="#i-wave"></use></svg></div>
+        <div class="now-meta">
+          <strong id="nowTitle">Aucune piste sélectionnée</strong>
+          <span id="nowArtist">Choisissez une piste pour l’écouter</span>
         </div>
-
-        <label class="searchbox">
-          <svg class="icon"><use href="#i-search"></use></svg>
-          <input id="searchInput" type="search" placeholder="Titre, artiste, tag, tonalité…" autocomplete="off">
-          <kbd>/</kbd>
-        </label>
-
-        <section class="filter-section">
-          <h3>Familles</h3>
-          <div class="chips" id="familyFilters"></div>
-        </section>
-
-        <section class="filter-section" id="clusterSection" hidden>
-          <h3>Clusters <span class="hint">similarité</span></h3>
-          <div class="chips" id="clusterFilters"></div>
-        </section>
-
-        <section class="filter-section">
-          <h3>Tags <span class="hint">ET</span></h3>
-          <div class="tag-groups" id="tagFilters"></div>
-        </section>
-
-        <section class="filter-section range-section">
-          <h3>Caractéristiques</h3>
-          <div class="range-row">
-            <label>BPM min <input id="bpmMin" type="number" min="0" max="240" step="1" value="0"></label>
-            <label>BPM max <input id="bpmMax" type="number" min="0" max="240" step="1" value="240"></label>
-          </div>
-          <div class="range-row">
-            <label>Durée min <input id="durMin" type="number" min="0" max="20" step="0.5" value="0"></label>
-            <label>Durée max <input id="durMax" type="number" min="0" max="20" step="0.5" value="20"></label>
-          </div>
-          <label class="slider-row">Confiance min <output id="confOut">0 %</output>
-            <input id="confMin" type="range" min="0" max="100" step="5" value="0">
-          </label>
-        </section>
-
-        <label class="switch-row">
-          <input id="favoritesOnly" type="checkbox">
-          <span class="switch"></span>
-          <span>Favoris uniquement</span>
-        </label>
-
-        <div class="filter-summary" id="filterSummary">20 / 20 pistes</div>
-        <p class="micro note">Les scores sont des estimations relatives au corpus. La confiance et les ellipses indiquent l’incertitude.</p>
-      </aside>
-
-      <section class="center">
-        <div class="panel map-panel">
-          <div class="panel-head map-head">
-            <div>
-              <h2 id="mapTitle">Carte émotionnelle</h2>
-              <p class="micro" id="mapSubtitle">Cliquer une piste pour l’écouter au hook · couleur = tension · taille = confiance</p>
-            </div>
-            <div class="map-legend" aria-label="Légende">
-              <span><i class="dot calm"></i> calme</span>
-              <span><i class="dot tense"></i> tendu</span>
-              <span><i class="ring"></i> confiance</span>
-            </div>
-          </div>
-          <div class="view-tabs" id="viewTabs" role="tablist" aria-label="Type de carte">
-            <button class="view-tab active" type="button" role="tab" aria-selected="true" data-view="affect">Carte affective</button>
-            <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="clusters">Clusters de similarité</button>
-          </div>
-          <div class="map-wrap" id="mapWrap">
-            <svg id="emotionMap" viewBox="0 0 900 620" role="img" aria-label="Carte valence-arousal des pistes">
-              <defs>
-                <radialGradient id="fadeGlow" cx="50%" cy="50%" r="60%">
-                  <stop offset="0%" stop-color="var(--accent)" stop-opacity=".10"/>
-                  <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
-                </radialGradient>
-                <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
-                  <feGaussianBlur stdDeviation="5" result="b"/>
-                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-              </defs>
-              <rect x="0" y="0" width="900" height="620" fill="transparent"/>
-              <g id="mapQuadrants"></g>
-              <g id="mapGrid"></g>
-              <g id="mapPoints"></g>
-              <g id="mapCrosshair" class="crosshair" hidden>
-                <line id="crossX" x1="0" y1="0" x2="0" y2="620"></line>
-                <line id="crossY" x1="0" y1="0" x2="900" y2="0"></line>
-              </g>
-            </svg>
-            <span class="axis-label axis-top">solaire</span>
-            <span class="axis-label axis-bottom">mélancolique</span>
-            <span class="axis-label axis-left">calme</span>
-            <span class="axis-label axis-right">énergique</span>
-            <div class="quadrant-label q-tl">lumineux · posé</div>
-            <div class="quadrant-label q-tr">solaire · intense</div>
-            <div class="quadrant-label q-bl">mélancolique · calme</div>
-            <div class="quadrant-label q-br">sombre · intense</div>
-            <div class="tooltip" id="mapTooltip" hidden></div>
-            <div class="map-readout" id="mapReadout">Survolez la carte pour lire une position.</div>
-          </div>
-          <div class="map-wrap cluster-wrap" id="clusterWrap" hidden>
-            <svg id="clusterMap" viewBox="0 0 900 620" role="img" aria-label="Carte des groupes de pistes par similarité">
-              <defs>
-                <filter id="clusterGlow" x="-40%" y="-40%" width="180%" height="180%">
-                  <feGaussianBlur stdDeviation="10" result="b"/>
-                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-              </defs>
-              <rect x="0" y="0" width="900" height="620" fill="transparent"/>
-              <g id="clusterBubbles"></g>
-            </svg>
-            <div class="cluster-legend">
-              <span><i class="bubble-key"></i> groupe</span>
-              <span>taille = nombre de pistes</span>
-              <span>cliquer pour filtrer</span>
-            </div>
-            <div class="tooltip" id="clusterTooltip" hidden></div>
-            <div class="map-readout" id="clusterReadout">Chaque bulle regroupe les pistes qui se ressemblent.</div>
-          </div>
-          <div class="map-footer">
-            <div class="presets" id="presets" aria-label="Presets cinéma">
-              <button type="button" class="chip active" data-preset="Tout">Tout</button>
-              <button type="button" class="chip" data-preset="Ouverture">Ouverture</button>
-              <button type="button" class="chip" data-preset="Paysage/drone">Paysage</button>
-              <button type="button" class="chip" data-preset="Transition">Transition</button>
-              <button type="button" class="chip" data-preset="Action/montage">Action</button>
-              <button type="button" class="chip" data-preset="Portrait/intime">Portrait</button>
-              <button type="button" class="chip" data-preset="Résolution/générique">Résolution</button>
-            </div>
-            <div class="map-caption" id="presetCaption">Toutes les pistes</div>
-          </div>
-        </div>
-
-        <div class="panel list-panel">
-          <div class="panel-head list-head">
-            <div>
-              <h2>Pistes <span class="count" id="resultCount">0</span></h2>
-              <p class="micro" id="listCaption">Tri par pertinence</p>
-            </div>
-            <label class="select-wrap">Tri
-              <select id="sortSelect">
-                <option value="relevance">Pertinence</option>
-                <option value="energy">Énergie</option>
-                <option value="valence">Valence</option>
-                <option value="tension">Tension</option>
-                <option value="cluster">Cluster</option>
-                <option value="bpm">BPM</option>
-                <option value="duration">Durée</option>
-                <option value="title">Titre</option>
-              </select>
-            </label>
-          </div>
-          <div class="track-list" id="trackList" role="list"></div>
-        </div>
-      </section>
-
-      <aside class="panel detail" id="detailPanel" aria-label="Détail de la piste">
-        <div class="detail-empty" id="detailEmpty">
-          <div class="empty-mark">
-            <svg class="icon"><use href="#i-wave"></use></svg>
-          </div>
-          <h2>Choisir une piste</h2>
-          <p>Cliquez un point sur la carte ou une ligne de la liste. La lecture démarre au hook de 12 secondes, pas au début.</p>
-        </div>
-        <div id="detailContent" hidden></div>
-      </aside>
-    </main>
+      </div>
+      <button class="icon-btn play" id="playBtn" type="button" aria-label="Lecture" disabled><svg class="icon"><use href="#i-play"></use></svg></button>
+      <div class="timeline">
+        <span class="time" id="timeCurrent">0:00</span>
+        <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Position de lecture">
+        <span class="time" id="timeTotal">0:00</span>
+      </div>
+      <div class="player-actions">
+        <span class="badge-preview" id="previewBadge" hidden>extrait 12 s</span>
+        <button class="icon-btn" id="loopBtn" type="button" aria-label="Boucler" aria-pressed="false"><svg class="icon"><use href="#i-loop"></use></svg></button>
+        <button class="icon-btn" id="downloadBtn" type="button" aria-label="Télécharger le MP3" disabled><svg class="icon"><use href="#i-download"></use></svg></button>
+        <button class="icon-btn" id="shortlistBtn" type="button" aria-label="Ajouter à la short-list" disabled><svg class="icon"><use href="#i-star"></use></svg></button>
+        <label class="volume" title="Volume"><svg class="icon" aria-hidden="true"><use href="#i-volume"></use></svg><input id="volume" type="range" min="0" max="100" value="80" aria-label="Volume"></label>
+      </div>
+    </footer>
   </div>
 
-  <footer class="player" id="player">
-    <div class="now-playing">
-      <div class="cover" id="playerCover" aria-hidden="true">
-        <svg class="icon"><use href="#i-wave"></use></svg>
-      </div>
-      <div class="now-meta">
-        <strong id="playerTitle">Aucune piste sélectionnée</strong>
-        <span id="playerArtist">Sélectionnez une piste pour commencer</span>
-      </div>
-    </div>
-    <div class="transport">
-      <button class="icon-btn" id="playBtn" type="button" title="Lecture / pause" aria-label="Lecture / pause" disabled>
-        <svg class="icon"><use href="#i-play"></use></svg>
-      </button>
-    </div>
-    <div class="timeline">
-      <span class="time" id="timeCurrent">0:00</span>
-      <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Position de lecture">
-      <span class="time" id="timeTotal">0:00</span>
-    </div>
-    <div class="player-actions">
-      <button class="icon-btn" id="loopBtn" type="button" title="Boucler le hook" aria-label="Boucler le hook" aria-pressed="false">
-        <svg class="icon"><use href="#i-loop"></use></svg>
-      </button>
-      <button class="icon-btn" id="favPlayerBtn" type="button" title="Favori" aria-label="Favori" aria-pressed="false">
-        <svg class="icon"><use href="#i-star"></use></svg>
-      </button>
-      <label class="volume" title="Volume">
-        <svg class="icon"><use href="#i-volume"></use></svg>
-        <input id="volume" type="range" min="0" max="100" value="80" step="1" aria-label="Volume">
-      </label>
-    </div>
-    <audio id="audio" preload="metadata"></audio>
-  </footer>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-  <div class="toast" id="toast" hidden></div>
-
-  <div class="modal" id="modal" hidden>
-    <div class="modal-backdrop" data-close-modal></div>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-      <div class="modal-head">
-        <h2 id="modalTitle">Méthodologie</h2>
-        <button class="icon-btn" type="button" data-close-modal aria-label="Fermer">
-          <svg class="icon"><use href="#i-close"></use></svg>
-        </button>
-      </div>
-      <div class="modal-body" id="modalBody"></div>
+  <dialog class="dialog" id="appDialog">
+    <div class="dialog-head">
+      <h2 id="dialogTitle">À propos</h2>
+      <button class="icon-btn" type="button" id="dialogClose" aria-label="Fermer"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
-  </div>
+    <div class="dialog-body" id="dialogBody"></div>
+  </dialog>
 
-  <script src="/app.js?v=5"></script>
+  <audio id="audio" preload="metadata"></audio>
+  <script type="module" src="/app.js?v=11"></script>
 </body>
 </html>
