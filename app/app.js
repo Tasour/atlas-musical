@@ -423,6 +423,16 @@ function renderRoute(focus = false) {
     track: "Décider",
   };
   document.title = `${titles[state.route.name] || "Atlas Musical"} — Atlas Musical`;
+  const detail =
+    state.route.name === "group"
+      ? state.nodes.get(state.route.groupId)?.name
+      : state.route.name === "track"
+        ? state.trackById.get(state.route.trackId)?.title
+        : state.route.name === "shortlist"
+          ? `${state.shortlist.size} piste(s)`
+          : "";
+  const announcer = $("#routeAnnouncer");
+  if (announcer) announcer.textContent = `${titles[state.route.name] || "Atlas Musical"}${detail ? ` — ${detail}` : ""}`;
 }
 
 function refreshView(focusSelector = null) {
@@ -662,10 +672,15 @@ function renderSearchResults(results) {
 function bindSearch() {
   const input = $("#searchInput");
   if (!input) return;
+  let timer = null;
   input.addEventListener("input", () => {
-    state.search = input.value.trim();
-    syncUrl();
-    refreshView("#searchInput");
+    const value = input.value.trim();
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      state.search = value;
+      syncUrl();
+      refreshView("#searchInput");
+    }, 160);
   });
   const clear = $("[data-clear-search]");
   if (clear) {
@@ -755,8 +770,8 @@ function renderGroup(groupId) {
        <a class="btn primary" href="#/shortlist">${icon("star")} Short-list <b id="shortlistInline">${state.shortlist.size}</b></a>`
     )}
     <div class="group-meta">
-      ${node.stability ? `<span class="badge">stabilité ${Math.round(node.stability * 100)} %</span>` : ""}
-      ${node.silhouette ? `<span class="badge">silhouette ${Number(node.silhouette).toFixed(2)}</span>` : ""}
+      ${node.stability ? `<span class="badge" title="Jaccard bootstrap : proportion de fois où ce groupe est retrouvé sur des rééchantillonnages.">stabilité ${Math.round(node.stability * 100)} %</span>` : ""}
+      ${node.silhouette ? `<span class="badge" title="Silhouette : cohésion interne du groupe (plus haut = mieux séparé).">silhouette ${Number(node.silhouette).toFixed(2)}</span>` : ""}
       ${(node.top_tags || []).slice(0, 4).map((tag) => `<span class="tag" style="--tag:${tagColor(tag.name)}">${esc(tag.name)}</span>`).join("")}
       <span class="micro">${esc(node.description || "")}</span>
     </div>
@@ -1331,7 +1346,7 @@ function annotationHtml(track) {
     ${annSlider("arousal", "Arousal", annotation.arousal ?? effect.arousal)}
     ${annSlider("tension", "Tension", annotation.tension ?? effect.tension)}
     <div class="chips ann-tags">${tags}</div>
-    <textarea id="annNote" rows="2" placeholder="Note d’écoute, plan prévu, réserve…">${esc(annotation.note || "")}</textarea>
+    <textarea id="annNote" rows="2" aria-label="Note d’écoute" placeholder="Note d’écoute, plan prévu, réserve…">${esc(annotation.note || "")}</textarea>
     <div class="form-actions">
       <button class="btn small primary" type="submit">${icon("check")} Enregistrer</button>
       ${annotation.updated_at ? `<button class="btn small ghost" type="button" data-clear-annotation>Effacer</button>` : ""}
@@ -1839,6 +1854,23 @@ function bindEvents() {
     const menu = $("#moreMenu");
     menu.hidden = !menu.hidden;
     $("#menuBtn").setAttribute("aria-expanded", String(!menu.hidden));
+    if (!menu.hidden) $("button", menu)?.focus();
+  });
+  $("#moreMenu").addEventListener("keydown", (event) => {
+    const items = $$("button", $("#moreMenu"));
+    const index = items.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = event.key === "ArrowDown" ? (index + 1) % items.length : (index - 1 + items.length) % items.length;
+      items[next]?.focus();
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      items[event.key === "Home" ? 0 : items.length - 1]?.focus();
+    } else if (event.key === "Escape") {
+      $("#moreMenu").hidden = true;
+      $("#menuBtn").setAttribute("aria-expanded", "false");
+      $("#menuBtn").focus();
+    }
   });
   document.addEventListener("click", () => {
     $("#moreMenu").hidden = true;
@@ -1998,6 +2030,7 @@ function showToast(message, kind = "") {
   const toast = $("#toast");
   toast.textContent = message;
   toast.className = `toast${kind ? ` ${kind}` : ""}`;
+  toast.setAttribute("role", kind === "error" ? "alert" : "status");
   toast.hidden = false;
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => {

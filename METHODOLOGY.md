@@ -41,6 +41,12 @@ La stabilité est estimée par bootstrap : 100 rééchantillonnages à 80 % pour
 
 Chaque nœud est nommé par ses tags les plus surreprésentés, avec une prévalence minimale et un lift positif. Les noms restent descriptifs : ils résument des proximités dans l’espace de features, pas des genres musicaux validés. Ils doivent être vérifiés à l’écoute.
 
+## Parcours et score de compatibilité
+
+Le brief est un filtre de préférence, pas une vérité : le score de compatibilité combine l’usage cinéma estimé (35 %), la proximité de valence (25 %) et d’arousal (20 %) avec le ton demandé, la durée du plan (10 %) et la boucle (10 % si le plan boucle). Ces poids sont fixes et affichés ; ils ne sont pas appris sur les annotations.
+
+Les groupes sont présentés du plus compatible au moins compatible, mais leur surface reste proportionnelle au nombre de pistes. Le score sert à ordonner, jamais à masquer l’incertitude.
+
 ## Descripteurs
 
 - **Rythme** : tempo, clarté de pulse (concentration du tempogramme 40–200 BPM, `(pic − moyenne)/pic`), confiance de tempo (`1,2 × clarté`, bornée), nombre de temps, taux d’onsets.

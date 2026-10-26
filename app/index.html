@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#000000">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <title>Atlas Musical — choisir une musique</title>
-  <link rel="stylesheet" href="/styles.css?v=14">
+  <link rel="stylesheet" href="/styles.css?v=15">
 </head>
 <body>
   <a class="skip-link" href="#view">Aller au contenu</a>
@@ -72,7 +72,8 @@
       </div>
     </header>
 
-    <main id="view" class="view" tabindex="-1" aria-live="polite"></main>
+    <main id="view" class="view" tabindex="-1"></main>
+    <div class="sr-only" id="routeAnnouncer" aria-live="polite"></div>
 
     <footer class="player" id="player" aria-label="Lecteur audio">
       <div class="now">
@@ -111,6 +112,6 @@
   <audio id="audio" preload="metadata"></audio>
   <audio id="abA" preload="metadata"></audio>
   <audio id="abB" preload="metadata"></audio>
-  <script type="module" src="/app.js?v=14"></script>
+  <script type="module" src="/app.js?v=15"></script>
 </body>
 </html>
