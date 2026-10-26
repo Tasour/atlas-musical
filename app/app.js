@@ -43,10 +43,14 @@ const state = {
   search: "",
   groupFilters: { tag: "", duration: "all" },
   lastGroupId: null,
+  lastGroupParams: null,
   player: { currentId: null, preview: false, loop: false },
+  ab: null,
 };
 
 const audio = $("#audio");
+const abA = $("#abA");
+const abB = $("#abB");
 
 function readJSON(key, fallback) {
   try {
@@ -359,21 +363,48 @@ function navigate(path) {
 
 function parseRoute() {
   const raw = window.location.hash.replace(/^#\/?/, "");
-  const parts = raw.split("/").filter(Boolean);
-  if (!parts.length) return { name: "groups" };
-  if (parts[0] === "brief") return { name: "brief" };
-  if (parts[0] === "shortlist") return { name: "shortlist" };
+  const [pathPart, queryPart] = raw.split("?");
+  const params = new URLSearchParams(queryPart || "");
+  const parts = pathPart.split("/").filter(Boolean);
+  if (!parts.length) return { name: "groups", params };
+  if (parts[0] === "brief") return { name: "brief", params };
+  if (parts[0] === "shortlist") return { name: "shortlist", params };
   if (parts[0] === "group" && parts[1]) {
-    return { name: "group", groupId: decodeURIComponent(parts.slice(1).join("/")) };
+    return { name: "group", groupId: decodeURIComponent(parts.slice(1).join("/")), params };
   }
   if (parts[0] === "track" && parts[1]) {
-    return { name: "track", trackId: decodeURIComponent(parts.slice(1).join("/")) };
+    return { name: "track", trackId: decodeURIComponent(parts.slice(1).join("/")), params };
   }
-  return { name: "groups" };
+  return { name: "groups", params };
+}
+
+function syncUrl() {
+  const route = state.route;
+  let base = "groups";
+  if (route.name === "brief") base = "brief";
+  else if (route.name === "shortlist") base = "shortlist";
+  else if (route.name === "group") base = `group/${encodeURIComponent(route.groupId)}`;
+  else if (route.name === "track") base = `track/${encodeURIComponent(route.trackId)}`;
+  const params = new URLSearchParams();
+  if (route.name === "groups" && state.search) params.set("q", state.search);
+  if (route.name === "group") {
+    if (state.groupFilters.tag) params.set("tag", state.groupFilters.tag);
+    if (state.groupFilters.duration !== "all") params.set("dur", state.groupFilters.duration);
+    if (state.showTracks) params.set("tracks", "1");
+  }
+  if (route.name === "shortlist" && state.shortlistFilter) params.set("status", state.shortlistFilter);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const target = `#/${base}${suffix}`;
+  state.route.params = params;
+  if (window.location.hash !== target) {
+    window.history.replaceState(null, "", target);
+  }
 }
 
 function renderRoute(focus = false) {
   state.route = parseRoute();
+  if (state.route.name === "groups") state.search = state.route.params.get("q") || "";
+  if (state.route.name === "shortlist") state.shortlistFilter = state.route.params.get("status") || null;
   updateFlowNav();
   renderView();
   if (focus) {
@@ -633,12 +664,14 @@ function bindSearch() {
   if (!input) return;
   input.addEventListener("input", () => {
     state.search = input.value.trim();
+    syncUrl();
     refreshView("#searchInput");
   });
   const clear = $("[data-clear-search]");
   if (clear) {
     clear.addEventListener("click", () => {
       state.search = "";
+      syncUrl();
       refreshView("#searchInput");
     });
   }
@@ -654,10 +687,13 @@ function renderGroup(groupId) {
     $("#view").innerHTML = `<div class="page">${pageHead("Étape 3", "Groupe introuvable", "Ce groupe n’existe pas.")}<a class="btn primary" href="#/groups">Retour aux groupes</a></div>`;
     return;
   }
-  if (state.lastGroupId !== groupId) {
-    state.groupFilters = { tag: "", duration: "all" };
-    state.showTracks = false;
+  const params = state.route.params || new URLSearchParams();
+  const signature = params.toString();
+  if (state.lastGroupId !== groupId || state.lastGroupParams !== signature) {
+    state.groupFilters = { tag: params.get("tag") || "", duration: params.get("dur") || "all" };
+    state.showTracks = params.get("tracks") === "1";
     state.lastGroupId = groupId;
+    state.lastGroupParams = signature;
   }
   const path = [];
   let cursor = node;
@@ -790,12 +826,14 @@ function bindTrackGrid() {
     button.addEventListener("click", () => {
       const tag = button.dataset.tagFilter;
       state.groupFilters.tag = state.groupFilters.tag === tag ? "" : tag;
+      syncUrl();
       refreshView(`[data-tag-filter="${CSS.escape(tag)}"]`);
     });
   });
   $$("[data-duration-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       state.groupFilters.duration = button.dataset.durationFilter;
+      syncUrl();
       refreshView(`[data-duration-filter="${button.dataset.durationFilter}"]`);
     });
   });
@@ -1009,6 +1047,7 @@ function renderShortlist() {
   $$("[data-status-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       state.shortlistFilter = button.dataset.statusFilter || null;
+      syncUrl();
       refreshView(`[data-status-filter="${CSS.escape(state.shortlistFilter || "")}"]`);
     });
   });
@@ -1090,7 +1129,9 @@ function renderCompare(tracks) {
         .join("")}</tbody>
     </table></div>
     <div class="panel-actions">
-      <button class="btn small" type="button" data-play-compare>Écouter A puis B (6 s)</button>
+      <button class="btn small" type="button" data-ab-start="${esc(tracks[0].id)}|${esc(tracks[1].id)}">${icon("compare")} Comparer A/B</button>
+      ${tracks.length > 2 ? `<button class="btn small ghost" type="button" data-play-compare>Écouter la suite (6 s)</button>` : ""}
+      ${state.ab ? `<span class="ab-status">A/B en cours · écoute <b>${state.ab.active.toUpperCase()}</b> · <button class="link" type="button" data-ab-toggle>Basculer</button> · <button class="link" type="button" data-ab-stop>Arrêter</button></span>` : ""}
       ${tracks.some((track) => shortlistEntry(track.id)?.status === "choisi") ? "" : `<button class="btn small primary" type="button" data-choose="${esc(tracks[0].id)}">Choisir ${esc(tracks[0].title)}</button>`}
     </div>
   </section>`;
@@ -1371,8 +1412,64 @@ function currentTrack() {
   return state.player.currentId ? state.trackById.get(state.player.currentId) : null;
 }
 
+function stopAB({ refresh = false } = {}) {
+  if (!state.ab) return;
+  abA.pause();
+  abB.pause();
+  state.ab = null;
+  if (refresh) refreshView();
+}
+
+function startAB(aId, bId) {
+  const first = state.trackById.get(aId);
+  const second = state.trackById.get(bId);
+  if (!first || !second || first.id === second.id) return;
+  stopAB();
+  state.player.preview = false;
+  state.player.currentId = null;
+  audio.pause();
+  audio.removeAttribute("src");
+  abA.pause();
+  abB.pause();
+  const offset = Math.max(0, Math.min(30, Math.min(first.duration, second.duration) - 20));
+  const ready = { a: false, b: false };
+  const start = () => {
+    if (!ready.a || !ready.b || !state.ab) return;
+    abA.currentTime = offset;
+    abB.currentTime = offset;
+    abA.volume = audio.volume;
+    abB.volume = audio.volume;
+    abA.play().catch(() => {});
+  };
+  abA.onloadedmetadata = () => { ready.a = true; start(); };
+  abB.onloadedmetadata = () => { ready.b = true; start(); };
+  abA.src = first.audio_url;
+  abB.src = second.audio_url;
+  state.ab = { aId, bId, active: "a", offset };
+  abA.load();
+  abB.load();
+  $("#nowTitle").textContent = "Comparaison A/B";
+  $("#nowArtist").textContent = `${first.title} ↔ ${second.title}`;
+  refreshView();
+  showToast("Comparaison A/B · même position, bascule instantanée.");
+}
+
+function toggleAB() {
+  if (!state.ab) return;
+  const isA = state.ab.active === "a";
+  const from = isA ? abA : abB;
+  const to = isA ? abB : abA;
+  const position = Number(from.currentTime) || state.ab.offset;
+  from.pause();
+  to.currentTime = position;
+  to.play().catch(() => {});
+  state.ab.active = isA ? "b" : "a";
+  refreshView();
+}
+
 function playTrack(track, { preview = true } = {}) {
   if (!track) return;
+  stopAB();
   const start = Number(track.hook_start) || 0;
   const same = state.player.currentId === track.id;
   state.player.preview = preview;
@@ -1693,6 +1790,8 @@ function bindEvents() {
   });
   $("#volume").addEventListener("input", (event) => {
     audio.volume = Number(event.target.value) / 100;
+    abA.volume = audio.volume;
+    abB.volume = audio.volume;
     writeJSON(STORAGE.volume, audio.volume);
   });
   $("#loopBtn").addEventListener("click", () => {
@@ -1807,6 +1906,22 @@ function bindEvents() {
       refreshView();
       return;
     }
+    const abStart = event.target.closest("[data-ab-start]");
+    if (abStart) {
+      const [aId, bId] = abStart.dataset.abStart.split("|");
+      startAB(aId, bId);
+      return;
+    }
+    const abToggle = event.target.closest("[data-ab-toggle]");
+    if (abToggle) {
+      toggleAB();
+      return;
+    }
+    const abStop = event.target.closest("[data-ab-stop]");
+    if (abStop) {
+      stopAB({ refresh: true });
+      return;
+    }
     const playCompare = event.target.closest("[data-play-compare]");
     if (playCompare) {
       playCompareSequence();
@@ -1828,6 +1943,7 @@ function bindEvents() {
     const toggle = event.target.closest("[data-toggle-tracks]");
     if (toggle) {
       state.showTracks = !state.showTracks;
+      syncUrl();
       refreshView("[data-toggle-tracks]");
     }
   });
