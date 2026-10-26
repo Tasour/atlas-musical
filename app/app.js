@@ -42,6 +42,7 @@ const state = {
   compare: [],
   search: "",
   groupFilters: { tag: "", duration: "all" },
+  groupSort: "auto",
   lastGroupId: null,
   lastGroupParams: null,
   player: { currentId: null, preview: false, loop: false },
@@ -255,6 +256,19 @@ function removeFromShortlist(id) {
   });
 }
 
+function moveShortlist(id, delta) {
+  const items = [...state.shortlist.values()].sort((a, b) => a.order - b.order);
+  const index = items.findIndex((entry) => entry.id === id);
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= items.length) return;
+  items.splice(target, 0, items.splice(index, 1)[0]);
+  items.forEach((entry, position) => {
+    entry.order = position;
+  });
+  saveShortlist();
+  refreshView();
+}
+
 function setShortlistStatus(id, status) {
   const entry = state.shortlist.get(id);
   if (!entry) return;
@@ -400,6 +414,7 @@ function syncUrl() {
   if (route.name === "group") {
     if (state.groupFilters.tag) params.set("tag", state.groupFilters.tag);
     if (state.groupFilters.duration !== "all") params.set("dur", state.groupFilters.duration);
+    if (state.groupSort !== "auto") params.set("sort", state.groupSort);
     if (state.showTracks) params.set("tracks", "1");
   }
   if (route.name === "shortlist" && state.shortlistFilter) params.set("status", state.shortlistFilter);
@@ -739,6 +754,7 @@ function renderGroup(groupId) {
   const signature = params.toString();
   if (state.lastGroupId !== groupId || state.lastGroupParams !== signature) {
     state.groupFilters = { tag: params.get("tag") || "", duration: params.get("dur") || "all" };
+    state.groupSort = params.get("sort") || "auto";
     state.showTracks = params.get("tracks") === "1";
     state.lastGroupId = groupId;
     state.lastGroupParams = signature;
@@ -850,7 +866,17 @@ function filteredNodeTracks(node) {
       return minutes > 4;
     });
   }
-  return sortedTracks(list);
+  return sortGroupTracks(list);
+}
+
+function sortGroupTracks(list) {
+  const items = [...list];
+  if (state.groupSort === "bpm") items.sort((a, b) => Number(a.bpm || 0) - Number(b.bpm || 0));
+  else if (state.groupSort === "duration") items.sort((a, b) => Number(a.duration || 0) - Number(b.duration || 0));
+  else if (state.groupSort === "title") items.sort((a, b) => a.title.localeCompare(b.title, "fr"));
+  else if (state.groupSort === "confidence") items.sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0));
+  else return sortedTracks(items);
+  return items;
 }
 
 function renderTrackList(tracks, node) {
@@ -872,9 +898,13 @@ function renderTrackList(tracks, node) {
         `<button class="chip${state.groupFilters.duration === key ? " active" : ""}" type="button" data-duration-filter="${key}" aria-pressed="${state.groupFilters.duration === key}">${label}</button>`
     )
     .join("");
+  const sortOptions = [["auto", "Auto"], ["brief", "Brief"], ["confidence", "Confiance"], ["bpm", "BPM"], ["duration", "Durée"], ["title", "Titre"]];
   return `<div class="filter-bar">
       <span class="micro">Affiner :</span>
       <div class="chips">${tagChips}${durations}</div>
+      <label class="field-inline">Tri
+        <select id="groupSort">${sortOptions.map(([value, label]) => `<option value="${value}" ${state.groupSort === value ? "selected" : ""}>${label}</option>`).join("")}</select>
+      </label>
       <span class="micro">${tracks.length} piste(s)</span>
     </div>
     <div class="track-grid">${tracks.length ? tracks.map((track) => trackCard(track)).join("") : `<div class="empty">Aucune piste avec ces filtres.</div>`}</div>`;
@@ -889,6 +919,14 @@ function bindTrackGrid() {
       refreshView(`[data-tag-filter="${CSS.escape(tag)}"]`);
     });
   });
+  const groupSort = $("#groupSort");
+  if (groupSort) {
+    groupSort.addEventListener("change", () => {
+      state.groupSort = groupSort.value;
+      syncUrl();
+      refreshView("#groupSort");
+    });
+  }
   $$("[data-duration-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       state.groupFilters.duration = button.dataset.durationFilter;
@@ -901,6 +939,9 @@ function bindTrackGrid() {
       const track = state.trackById.get(button.dataset.preview);
       if (track) playTrack(track, { preview: true });
     });
+  });
+  $$("[data-move-id]").forEach((button) => {
+    button.addEventListener("click", () => moveShortlist(button.dataset.moveId, Number(button.dataset.move)));
   });
   $$("[data-remove]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1170,6 +1211,8 @@ function shortlistCard(entry, track) {
       <button class="btn small" type="button" data-preview="${esc(track.id)}">${icon("play")} 12 s</button>
       <a class="btn small ghost" href="#/track/${encodeURIComponent(track.id)}">Analyser</a>
       <label class="check small"><input type="checkbox" data-compare="${esc(track.id)}" ${state.compare.includes(track.id) ? "checked" : ""}> Comparer</label>
+      <button class="btn small ghost" type="button" data-move-id="${esc(track.id)}" data-move="-1" aria-label="Monter dans la short-list">↑</button>
+      <button class="btn small ghost" type="button" data-move-id="${esc(track.id)}" data-move="1" aria-label="Descendre dans la short-list">↓</button>
       <button class="btn small danger" type="button" data-remove="${esc(track.id)}">${icon("trash")} Retirer</button>
     </div>
   </article>`;

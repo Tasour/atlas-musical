@@ -14,8 +14,8 @@ Atlas Musical organise la recherche musicale en un parcours linéaire, avec une 
 
 1. **Brief** (optionnel) : type de plan, durée, ton, boucle, dialogue.
 2. **Explorer** : 4 à 6 grands groupes de similarité, en treemap, classés par compatibilité avec le brief.
-3. **Affiner** : descente dans les sous-groupes puis les familles fines, avec carte affective du cohorte et facettes contextuelles.
-4. **Short-list** : 5 à 15 candidates, statuts (à écouter / retenu / écarté / choisi), notes, comparaison de 2 à 3 pistes et A/B synchronisé.
+3. **Affiner** : descente dans les sous-groupes puis les familles fines, avec carte affective du cohorte, facettes contextuelles et tri.
+4. **Short-list** : 5 à 15 candidates, statuts (à écouter / retenu / écarté / choisi), notes, réorganisation manuelle, comparaison de 2 à 3 pistes et A/B synchronisé.
 5. **Décider** : analyse détaillée, hook de 12 s, points de coupe, licence et crédit, export de la sélection.
 
 Les filtres et la recherche sont encodés dans l’URL (`#/group/c1?tag=Tension&tracks=1`), ce qui rend une exploration partageable et rejouable.

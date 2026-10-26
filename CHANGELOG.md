@@ -16,6 +16,7 @@ Toutes les dates sont au format AAAA-MM-JJ.
 - Endpoint `/api/library/summary` (payload allégé), chargement à la demande des features et compression gzip.
 - Onboarding one-shot, panneau de qualité des groupes (stabilité, silhouette, ACP, mini-graphiques) et bannière de décision finale avec pack MP3.
 - Annulation de la suppression d’une piste de la short-list.
+- Tri du groupe (brief, confiance, BPM, durée, titre) et réorganisation manuelle de la short-list.
 - Filtre, tri et fiche détaillée par cluster ; endpoint `GET /api/clusters`.
 - Bouton de téléchargement MP3 sur chaque piste de la liste.
 - Endpoint `GET /api/download/{id}` avec nom de fichier lisible `Artiste - Titre.mp3`.
