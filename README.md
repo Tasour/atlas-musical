@@ -139,6 +139,7 @@ Les dossiers `audio/`, `data/` et `work/` sont créés à l’exécution et igno
 
 - `GET /api/health`
 - `GET /api/library`
+- `GET /api/library/summary` (métadonnées légères, features chargées à la demande)
 - `GET /api/clusters`
 - `GET /api/track/{id}`
 - `GET /api/audio/{id}` (Range supporté)

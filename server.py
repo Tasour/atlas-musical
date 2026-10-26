@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
+from starlette.middleware.gzip import GZipMiddleware
 
 ROOT = Path(__file__).resolve().parent
 APP_DIR = ROOT / "app"
@@ -35,6 +36,7 @@ EXPORTS = DATA / "exports"
 EXPORTS.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Atlas Musical", version="1.0")
+app.add_middleware(GZipMiddleware, minimum_size=800)
 
 
 def now() -> str:
@@ -218,6 +220,21 @@ def health() -> dict:
 @app.get("/api/library")
 def library() -> dict:
     return merged_library()
+
+
+@app.get("/api/library/summary")
+def library_summary() -> dict:
+    lib = merged_library()
+    lib["tracks"] = [
+        {
+            key: value
+            for key, value in track.items()
+            if key not in {"features", "arc", "tag_scores", "sha256", "source_title"}
+        }
+        for track in lib.get("tracks", [])
+    ]
+    lib.setdefault("meta", {})["summary"] = True
+    return lib
 
 
 @app.get("/api/clusters")

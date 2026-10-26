@@ -13,6 +13,7 @@ Toutes les dates sont au format AAAA-MM-JJ.
 - Export ZIP de la short-list avec MP3, sélection JSON et crédits ; suivi « licence vérifiée ».
 - Comparateur A/B synchronisé (deux lecteurs, bascule instantanée) et état de recherche/filtres dans l’URL.
 - Recherche débouncée, annonce des changements de vue, menu clavier et focus restauré après les filtres/statuts.
+- Endpoint `/api/library/summary` (payload allégé), chargement à la demande des features et compression gzip.
 - Filtre, tri et fiche détaillée par cluster ; endpoint `GET /api/clusters`.
 - Bouton de téléchargement MP3 sur chaque piste de la liste.
 - Endpoint `GET /api/download/{id}` avec nom de fichier lisible `Artiste - Titre.mp3`.

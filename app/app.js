@@ -1266,6 +1266,24 @@ function renderTrack(trackId) {
 
   bindTrackGrid();
   bindTrackExtras(track);
+  if (!track.features || !track.tag_scores) loadTrackDetail(track);
+}
+
+const detailLoading = new Set();
+
+async function loadTrackDetail(track) {
+  if (detailLoading.has(track.id)) return;
+  detailLoading.add(track.id);
+  try {
+    const response = await fetch(`/api/track/${encodeURIComponent(track.id)}`);
+    if (!response.ok) throw new Error("Analyse indisponible");
+    Object.assign(track, await response.json());
+    if (state.route.name === "track" && state.route.trackId === track.id) refreshView();
+  } catch (error) {
+    showToast(error.message || "Analyse indisponible.", "error");
+  } finally {
+    detailLoading.delete(track.id);
+  }
 }
 
 function bindTrackExtras(track) {
@@ -2057,7 +2075,7 @@ async function init() {
 
   try {
     const [libraryResponse, themeResponse] = await Promise.all([
-      fetch("/api/library"),
+      fetch("/api/library/summary"),
       fetch("/api/theme"),
     ]);
     if (!libraryResponse.ok) throw new Error("Bibliothèque indisponible. Lancer analysis/analyze.py.");
