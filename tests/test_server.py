@@ -181,3 +181,30 @@ def test_export_selection_zip(tmp_path, monkeypatch):
         selection = json.loads(archive.read("selection.json"))
         assert selection["items"][0]["license_checked"] is True
         assert "artiste test" in archive.read("CREDITS.txt").decode().lower()
+
+
+def test_library_summary_drops_heavy_features(tmp_path, monkeypatch):
+    track = {
+        "id": "t1",
+        "title": "Titre",
+        "features": {"tempo": 90},
+        "arc": [0.5],
+        "tag_scores": {"Joie": 0.8},
+        "sha256": "abc",
+        "tags": ["Joie"],
+    }
+    library = tmp_path / "library.json"
+    library.write_text(json.dumps({"tracks": [track], "tags": []}), encoding="utf-8")
+    monkeypatch.setattr(server, "LIB_JSON", library)
+    monkeypatch.setattr(server, "CLUSTERS_JSON", tmp_path / "missing.json")
+    monkeypatch.setattr(server, "DB", tmp_path / "missing.sqlite")
+
+    payload = TestClient(server.app).get("/api/library/summary").json()
+    summary = payload["tracks"][0]
+
+    assert "features" not in summary
+    assert "arc" not in summary
+    assert "tag_scores" not in summary
+    assert "sha256" not in summary
+    assert summary["tags"] == ["Joie"]
+    assert payload["meta"]["summary"] is True

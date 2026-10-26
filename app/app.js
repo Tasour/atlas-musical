@@ -240,10 +240,19 @@ function addToShortlist(id, status = "a-ecouter") {
 }
 
 function removeFromShortlist(id) {
-  if (!state.shortlist.delete(id)) return;
+  const removed = state.shortlist.get(id);
+  if (!removed) return;
+  state.shortlist.delete(id);
   state.compare = state.compare.filter((item) => item !== id);
   saveShortlist();
-  showToast("Retiré de la short-list.");
+  showToast("Retiré de la short-list.", "", {
+    label: "Annuler",
+    fn: () => {
+      state.shortlist.set(id, removed);
+      saveShortlist();
+      refreshView();
+    },
+  });
 }
 
 function setShortlistStatus(id, status) {
@@ -805,6 +814,8 @@ function renderGroup(groupId) {
         <p><strong>Stabilité bootstrap :</strong> ${node.stability ? `${Math.round(node.stability * 100)} %` : "non calculée"} — part des rééchantillonnages où ce groupe est retrouvé.</p>
         <p><strong>Silhouette :</strong> ${node.silhouette ? Number(node.silhouette).toFixed(2) : "globale " + Number(state.clusters?.silhouette || 0).toFixed(2)} — cohésion interne, plus haut = mieux séparé.</p>
         <p><strong>ACP :</strong> ${(state.clusters?.pca?.explained_variance || []).slice(0, 3).map((value) => `${Math.round(value * 100)} %`).join(" · ") || "—"} de variance expliquée par les premières composantes.</p>
+        ${children.length ? `<div class="quality-bars"><h3>Stabilité des sous-groupes</h3><div class="bars">${children.map((child) => barRow(child.name, child.stability || 0, child.color || "var(--accent)")).join("")}</div></div>` : ""}
+        <div class="quality-bars"><h3>Variance ACP</h3><div class="bars">${(state.clusters?.pca?.explained_variance || []).slice(0, 4).map((value, index) => barRow(`PC${index + 1}`, value, "var(--calm)")).join("")}</div></div>
         <p class="micro">Ces indicateurs décrivent la partition, pas la qualité musicale. Les noms doivent être confirmés à l’écoute.</p>
       </div>
     </details>
@@ -2089,16 +2100,24 @@ function playCompareSequence() {
 
 /* ------------------------------ Init ------------------------------ */
 
-function showToast(message, kind = "") {
+function showToast(message, kind = "", action = null) {
   const toast = $("#toast");
-  toast.textContent = message;
+  toast.innerHTML = `<span>${esc(message)}</span>${action ? `<button class="toast-action" type="button">${esc(action.label)}</button>` : ""}`;
   toast.className = `toast${kind ? ` ${kind}` : ""}`;
   toast.setAttribute("role", kind === "error" ? "alert" : "status");
   toast.hidden = false;
   clearTimeout(showToast.timer);
+  const timeout = action ? 6000 : 3200;
   showToast.timer = setTimeout(() => {
     toast.hidden = true;
-  }, 3200);
+  }, timeout);
+  if (action) {
+    $(".toast-action", toast)?.addEventListener("click", () => {
+      clearTimeout(showToast.timer);
+      toast.hidden = true;
+      action.fn();
+    });
+  }
 }
 
 function renderFatal(error) {
